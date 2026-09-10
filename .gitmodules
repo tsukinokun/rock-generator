@@ -1,0 +1,3 @@
+[submodule "External/TsukinoEngine"]
+	path = External/TsukinoEngine
+	url = https://github.com/tsukinokun/TsukinoEngine
