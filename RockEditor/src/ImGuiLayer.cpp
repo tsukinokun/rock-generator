@@ -4,6 +4,8 @@
 //----------------------------------------------------------------------------
 #include <RockEditor/ImGuiLayer.hpp>
 
+#include <RockEditor/Localization.hpp>
+
 #include <Tsukino/Core/Log.hpp>
 #include <Tsukino/Renderer/DrawCommand.hpp>
 
@@ -29,10 +31,12 @@ namespace RockEditor {
         //! 説明を日本語で書くと全部 "?" になる。Windows に必ず入っている
         //! フォントから、見つかった最初の1つを日本語の字形範囲付きで読む。
         //!
-        //! 見つからなくても致命的ではない（既定フォントのままになる）ので
-        //! 失敗を報告しない。
+        //! 見つからなくても致命的ではない（既定フォントのままになる）が、
+        //! その状態で日本語を選ぶと全部 "?" になるので、成否は呼び出し側へ返す。
+        //!
+        //! @return 読み込めたら true
         //--------------------------------------------------------------------
-        void LoadJapaneseFont() {
+        bool LoadJapaneseFont() {
             // Meiryo UI → Meiryo → 游ゴシック の順で探す。
             // どれか1つは実質すべての Windows に入っている
             const char* candidates[] = {
@@ -44,9 +48,12 @@ namespace RockEditor {
             ImGuiIO& io = ImGui::GetIO();
             for(const char* path : candidates) {
                 if(io.Fonts->AddFontFromFileTTF(path, 17.0f, nullptr, io.Fonts->GetGlyphRangesJapanese())) {
-                    return;
+                    return true;
                 }
             }
+
+            Tsukino::Core::Log::Warn("No Japanese-capable font was found. The UI will stay in English.");
+            return false;
         }
 
     }    // namespace
@@ -88,7 +95,7 @@ namespace RockEditor {
         // .ini をリポジトリへ吐かせない。レイアウトはコードで敷く
         io.IniFilename = nullptr;
 
-        LoadJapaneseFont();
+        m_hasJapaneseFont = LoadJapaneseFont();
 
         ImGui::StyleColorsDark();
 
@@ -120,6 +127,10 @@ namespace RockEditor {
         // 押されたままになる。Window 側の専用コールバックで落とす
         //--------------------------------------------------------------------
         window.SetFocusLostCallback([]() { ImGui::GetIO().ClearInputKeys(); });
+
+        // 翻訳テーブルの食い違いはここで拾う。放っておくと「日本語にした
+        // 瞬間だけドックが崩れる」「統計パネルで落ちる」という形で後から出る
+        VerifyLocalizationTables();
 
         m_window      = &window;
         m_initialized = true;
@@ -188,11 +199,13 @@ namespace RockEditor {
         ImGuiID rightBottom = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.60f, nullptr, &right);
         ImGuiID rightIo     = ImGui::DockBuilderSplitNode(rightBottom, ImGuiDir_Down, 0.40f, nullptr, &rightBottom);
 
-        ImGui::DockBuilderDockWindow("Shape", left);
-        ImGui::DockBuilderDockWindow("Material / Bake", leftBottom);
-        ImGui::DockBuilderDockWindow("View", right);
-        ImGui::DockBuilderDockWindow("Stats", rightBottom);
-        ImGui::DockBuilderDockWindow("Parameters I/O", rightIo);
+        // ImHashStr は ### でハッシュを開始し直すので、ここで渡す名前が
+        // 何語であってもドック先は変わらない（Localization.hpp の説明を参照）
+        ImGui::DockBuilderDockWindow(Tr(UiText::WindowShape), left);
+        ImGui::DockBuilderDockWindow(Tr(UiText::WindowMaterial), leftBottom);
+        ImGui::DockBuilderDockWindow(Tr(UiText::WindowView), right);
+        ImGui::DockBuilderDockWindow(Tr(UiText::WindowStats), rightBottom);
+        ImGui::DockBuilderDockWindow(Tr(UiText::WindowSettings), rightIo);
 
         ImGui::DockBuilderFinish(dockId);
     }

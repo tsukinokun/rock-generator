@@ -14,3 +14,6 @@ Logs/
 
 # テストデータの生成物（Tools/make_test_*.py が作る）
 TestData/out/
+
+# エディタの設定（言語など）。各自の好みなので共有しない
+RockEditor.settings.json

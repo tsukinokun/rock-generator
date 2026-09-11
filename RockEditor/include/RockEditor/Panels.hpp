@@ -7,6 +7,7 @@
 //!         UI が変更通知を持つと二重管理になります。
 //----------------------------------------------------------------------------
 #pragma once
+#include <RockEditor/EditorSettings.hpp>
 #include <RockEditor/PreviewScene.hpp>
 
 #include <RockCore/Bake/UvRasterizer.hpp>
@@ -76,10 +77,20 @@ namespace RockEditor {
     void DrawStatsPanel(const PipelineSnapshot& snapshot, bool busy, float progress, const std::string& label);
 
     //------------------------------------------------------------------------
-    //! 保存・読み込みのパネルを描きます。
-    //! @param [in,out] params 岩のパラメータ
-    //! @param [in,out] ui     UI の状態
+    //! 設定と保存・読み込みのパネルを描きます。
+    //!
+    //! 言語が変わったかを返すのは、変わった瞬間だけ設定ファイルへ書きたい
+    //! ためです（毎フレーム書くわけにはいかない）。
+    //!
+    //! @param  [in,out] params                岩のパラメータ
+    //! @param  [in,out] ui                    UI の状態
+    //! @param  [in,out] settings              エディタの設定
+    //! @param  [in]     japaneseFontAvailable 日本語フォントが読めているか
+    //! @return 言語が変わったら true
     //------------------------------------------------------------------------
-    void DrawIoPanel(RockCore::RockParams& params, EditorUiState& ui);
+    bool DrawSettingsPanel(RockCore::RockParams& params,
+                           EditorUiState&        ui,
+                           EditorSettings&       settings,
+                           bool                  japaneseFontAvailable);
 
 }    // namespace RockEditor

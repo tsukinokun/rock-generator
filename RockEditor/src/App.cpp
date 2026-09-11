@@ -4,6 +4,8 @@
 //----------------------------------------------------------------------------
 #include <RockEditor/App.hpp>
 
+#include <RockEditor/Localization.hpp>
+
 #include <Tsukino/Core/Log.hpp>
 
 #include <imgui.h>
@@ -41,6 +43,22 @@ namespace RockEditor {
         if(!m_preview.Initialize(m_engine)) {
             return 1;
         }
+
+        //--------------------------------------------------------------------
+        // 言語を決める。
+        //
+        // ImGui の初期化より後に置いているのは、日本語フォントを読めたかを
+        // 見てから決めたいため。設定ファイルが無いのは初回起動なので正常系で、
+        // そのときだけ OS の UI 言語から決める
+        //--------------------------------------------------------------------
+        if(!LoadEditorSettings(m_settings, kEditorSettingsFileName)) {
+            m_settings.language = DetectSystemLanguage();
+        }
+        if(m_settings.language == Language::Japanese && !m_imgui.HasJapaneseFont()) {
+            // 日本語フォントが無い環境。選んでも "?" しか出ないので落とす
+            m_settings.language = Language::English;
+        }
+        SetLanguage(m_settings.language);
 
         auto previousTime = std::chrono::steady_clock::now();
 
@@ -99,7 +117,12 @@ namespace RockEditor {
         DrawMaterialPanel(m_editParams);
         DrawViewPanel(m_view);
         DrawStatsPanel(m_snapshot, m_jobs.IsBusy(), m_jobs.GetProgress(), m_jobs.GetLabel());
-        DrawIoPanel(m_editParams, m_ui);
+
+        // 言語が変わった瞬間だけ書き出す。毎フレーム書くわけにはいかない
+        if(DrawSettingsPanel(m_editParams, m_ui, m_settings, m_imgui.HasJapaneseFont())) {
+            SetLanguage(m_settings.language);
+            SaveEditorSettings(m_settings, kEditorSettingsFileName);
+        }
 
         if(m_ui.showImGuiDemo) {
             ImGui::ShowDemoWindow(&m_ui.showImGuiDemo);

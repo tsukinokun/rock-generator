@@ -14,6 +14,7 @@
 //!         どちらかになるためです。
 //----------------------------------------------------------------------------
 #pragma once
+#include <RockEditor/EditorSettings.hpp>
 #include <RockEditor/EngineBootstrap.hpp>
 #include <RockEditor/ImGuiLayer.hpp>
 #include <RockEditor/JobRunner.hpp>
@@ -73,6 +74,9 @@ namespace RockEditor {
         PreviewViewSettings m_view{};
         EditorUiState       m_ui{};
         PipelineSnapshot    m_snapshot{};
+
+        //! 起動をまたいで覚えておく設定（今は言語だけ）
+        EditorSettings m_settings{};
 
         //! GPU へ載せ済みのリビジョン。これが変わったときだけ載せ直す
         RockCore::u32 m_uploadedMeshRevision   = 0;

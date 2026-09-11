@@ -58,10 +58,21 @@ namespace RockEditor {
         //! 画面全体を覆うドックスペースを敷きます。
         void BeginDockSpace();
 
+        //------------------------------------------------------------------
+        //! 日本語が出せるフォントを読み込めたかを返します。
+        //!
+        //! 読めていない環境で日本語を選ぶと全部 "?" になるので、
+        //! UI 側で言語の選択肢を無効化するのに使います。
+        //!
+        //! @return 読み込めていれば true
+        //------------------------------------------------------------------
+        bool HasJapaneseFont() const { return m_hasJapaneseFont; }
+
     private:
         Tsukino::Core::Window* m_window      = nullptr;
         bool                   m_initialized = false;
         bool                   m_layoutBuilt = false;    //!< 既定のドック配置を組んだか
+        bool                   m_hasJapaneseFont = false;
     };
 
 }    // namespace RockEditor
