@@ -37,7 +37,7 @@ namespace RockEditor {
     struct PreviewViewSettings {
         float cameraYawDeg   = 35.0f;
         float cameraPitchDeg = 18.0f;
-        float cameraDistance = 2.1f;    //!< 岩の外接半径に対する倍率
+        float cameraDistance = 2.7f;    //!< 岩の外接半径に対する倍率
         float fovDeg         = 45.0f;
 
         //! ライトの向き（degree）。Phase 2 の検証でここを回す。

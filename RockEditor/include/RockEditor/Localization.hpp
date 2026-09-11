@@ -80,7 +80,6 @@ namespace RockEditor {
         LabelGain,
         ButtonAddLayer,
         ButtonRemoveLayer,
-        NotePhase3Shape,
 
         //-- マテリアル / ベイクパネル ---------------------------------------
         LabelBaseColor,
@@ -141,6 +140,54 @@ namespace RockEditor {
         StageMesh,
         StageUnwrap,
         StageBakeNormal,
+
+        //-- 破断面（Phase 3）------------------------------------------------
+        //
+        // 末尾へ足しているのは意図的。途中へ差し込むと kEnglish / kJapanese の
+        // 並びを手で揃え直すことになり、ずれても static_assert では捕まらない
+        LabelPreset,
+        PresetHint,
+        PresetWeathered,
+        PresetAngular,
+        PresetBoulder,
+        PresetSlab,
+
+        HeadingFracture,
+        LabelPlaneCutCount,
+        TipPlaneCutCount,
+        LabelPlaneCutDepth,
+        LabelPlaneAxisBias,
+        TipPlaneAxisBias,
+        LabelEdgeRounding,
+        TipEdgeRounding,
+        LabelCreaseAngle,
+        TipCreaseAngle,
+
+        LabelLayerKind,
+        KindFbm,
+        KindWorley,
+        KindRidged,
+        LabelSharpness,
+        TipSharpness,
+
+        FormatCutPlanes,
+        FormatSplitVertices,
+
+        //-- UV 展開 ---------------------------------------------------------
+        HeadingUnwrap,
+        LabelUnwrapMethod,
+        TipUnwrapMethod,
+        MethodOctahedral,
+        MethodXAtlas,
+        LabelTexelsPerUnit,
+        TipTexelsPerUnit,
+        LabelUvPadding,
+        TipUvPadding,
+
+        FormatUnwrapMethod,
+        FormatChartCount,
+        FormatAtlasUtilization,
+        NoteUnwrapFellBack,
 
         Count,
     };

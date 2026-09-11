@@ -15,9 +15,12 @@
 //----------------------------------------------------------------------------
 #pragma once
 #include <RockCore/Noise/NoiseStack.hpp>
+#include <RockCore/Shape/CutPlanes.hpp>
 #include <RockCore/Shape/RockParams.hpp>
 
 #include <RockCore/Math/Vec.hpp>
+
+#include <vector>
 
 // 名前空間 RockCore
 namespace RockCore {
@@ -39,6 +42,17 @@ namespace RockCore {
         //! @param [in] maxFrequency 載せる周波数の上限。0 以下で無制限
         //------------------------------------------------------------------
         RockField(const RockParams& params, float maxFrequency);
+
+        //------------------------------------------------------------------
+        //! ノイズ抜きの半径を求めます。外接球と破断面だけを畳んだ値です。
+        //!
+        //! メッシュを細分割するときの射影先に使います。ノイズを含めると
+        //! 中点が動いてしまい、破断面の平らさが保てません。
+        //!
+        //! @param  [in] dir 単位方向ベクトル
+        //! @return 半径
+        //------------------------------------------------------------------
+        float BaseRadius(const Vec3& dir) const;
 
         //------------------------------------------------------------------
         //! 方向 dir の半径を求めます。異方スケールはここには含みません。
@@ -115,13 +129,23 @@ namespace RockCore {
         //   bool Raycast1D(const Vec3& origin, const Vec3& dir, float tMin, float tMax, float& outT) const;
         //   F(origin + dir*t) の符号変化を1次元探索する。BVH は要らない
 
+        //------------------------------------------------------------------
+        //! 破断面を返します。メッシュを同じ平面で切るのに使います。
+        //! @return 破断面の列
+        //------------------------------------------------------------------
+        const std::vector<CutPlane>& GetCutPlanes() const { return m_cutPlanes; }
+
     private:
-        NoiseStack m_noise;
+        NoiseStack            m_noise;
+        std::vector<CutPlane> m_cutPlanes;
 
         float m_radius = 0.5f;
         Vec3  m_anisoScale{1.0f, 1.0f, 1.0f};
         Vec3  m_invAnisoScale{1.0f, 1.0f, 1.0f};
         float m_boundingRadius = 1.0f;
+
+        //! 稜線を丸める幅（ワールド単位）。smooth min の k
+        float m_edgeRounding = 0.0f;
     };
 
 }    // namespace RockCore

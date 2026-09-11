@@ -12,6 +12,7 @@
 #include <RockCore/Io/RockParamsJson.hpp>
 #include <RockCore/Random/Pcg32.hpp>
 #include <RockCore/Shape/RockMesher.hpp>
+#include <RockCore/Shape/RockPresets.hpp>
 
 #include <imgui.h>
 
@@ -38,6 +39,148 @@ namespace RockEditor {
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextDisabled("%s", text);
             ImGui::PopTextWrapPos();
+        }
+
+        //--------------------------------------------------------------------
+        //! プリセットの表示名を返します。
+        //! @param  [in] preset プリセット
+        //! @return 表示名
+        //--------------------------------------------------------------------
+        const char* TranslatePreset(RockCore::RockPreset preset) {
+            switch(preset) {
+            case RockCore::RockPreset::Weathered: return Tr(UiText::PresetWeathered);
+            case RockCore::RockPreset::Angular:   return Tr(UiText::PresetAngular);
+            case RockCore::RockPreset::Boulder:   return Tr(UiText::PresetBoulder);
+            case RockCore::RockPreset::Slab:      return Tr(UiText::PresetSlab);
+            default:                              return "?";
+            }
+        }
+
+        //--------------------------------------------------------------------
+        //! ノイズ層の種類の表示名を返します。
+        //! @param  [in] kind 種類
+        //! @return 表示名
+        //--------------------------------------------------------------------
+        const char* TranslateLayerKind(RockCore::NoiseLayerKind kind) {
+            switch(kind) {
+            case RockCore::NoiseLayerKind::Fbm:    return Tr(UiText::KindFbm);
+            case RockCore::NoiseLayerKind::Worley: return Tr(UiText::KindWorley);
+            case RockCore::NoiseLayerKind::Ridged: return Tr(UiText::KindRidged);
+            default:                               return "?";
+            }
+        }
+
+        //--------------------------------------------------------------------
+        //! UV 展開の方式の表示名を返します。
+        //! @param  [in] method 方式
+        //! @return 表示名
+        //--------------------------------------------------------------------
+        const char* TranslateUnwrapMethod(RockCore::UnwrapMethod method) {
+            switch(method) {
+            case RockCore::UnwrapMethod::Octahedral: return Tr(UiText::MethodOctahedral);
+            case RockCore::UnwrapMethod::XAtlas:     return Tr(UiText::MethodXAtlas);
+            default:                                 return "?";
+            }
+        }
+
+        //--------------------------------------------------------------------
+        //! UV 展開のつまみを描きます。
+        //!
+        //! @param [in,out] params 岩のパラメータ
+        //--------------------------------------------------------------------
+        void DrawUnwrapControls(RockCore::RockParams& params) {
+            ImGui::TextUnformatted(Tr(UiText::HeadingUnwrap));
+
+            if(ImGui::BeginCombo(Tr(UiText::LabelUnwrapMethod), TranslateUnwrapMethod(params.unwrapMethod))) {
+                constexpr RockCore::UnwrapMethod kMethods[] = {RockCore::UnwrapMethod::Octahedral,
+                                                               RockCore::UnwrapMethod::XAtlas};
+
+                for(const RockCore::UnwrapMethod method : kMethods) {
+                    if(ImGui::Selectable(TranslateUnwrapMethod(method), method == params.unwrapMethod)) {
+                        params.unwrapMethod = method;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipUnwrapMethod));
+
+            //----------------------------------------------------------------
+            // 0 は「xatlas に見積もらせる」という意味を持つ。
+            // スライダの下限を 0 にしておけばそのまま選べる
+            //----------------------------------------------------------------
+            ImGui::SliderFloat(Tr(UiText::LabelTexelsPerUnit), &params.texelsPerUnit, 0.0f, 4096.0f, "%.0f");
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipTexelsPerUnit));
+
+            ImGui::SliderInt(Tr(UiText::LabelUvPadding), &params.uvPadding, 0, 16);
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipUvPadding));
+        }
+
+        //--------------------------------------------------------------------
+        //! プリセットの選択を描きます。
+        //!
+        //! 選ぶとパラメータ一式が入れ替わります。シードとテクスチャの一辺だけは
+        //! 作業の文脈なので引き継ぎます（プリセットを見比べるたびに形と
+        //! 解像度が両方変わると比較にならない）。
+        //!
+        //! 項目は ImGui::Combo の "a\0b\0" 形式ではなく BeginCombo で並べます。
+        //! 訳文を実行時に連結して 0 区切りの列を組むことになるためです。
+        //!
+        //! @param [in,out] params 岩のパラメータ
+        //--------------------------------------------------------------------
+        void DrawPresetControl(RockCore::RockParams& params) {
+            // プレビュー欄は空にしない。パラメータは適用後に自由に編集できるので
+            // 「今どのプリセットか」という状態は持たないが、空欄だと
+            // 壊れているように見える
+            if(!ImGui::BeginCombo(Tr(UiText::LabelPreset), Tr(UiText::PresetHint))) {
+                return;
+            }
+
+            for(RockCore::u32 i = 0; i < RockCore::kRockPresetCount; ++i) {
+                const RockCore::RockPreset preset = static_cast<RockCore::RockPreset>(i);
+
+                ImGui::PushID(static_cast<int>(i));
+                if(ImGui::Selectable(TranslatePreset(preset))) {
+                    const RockCore::u64 seed        = params.seed;
+                    const int           textureSize = params.textureSize;
+
+                    // 展開方式は岩の見た目ではなく作業の都合なので引き継ぐ。
+                    // プリセットを見比べるたびに xatlas の待ち時間が入ると試せない
+                    const RockCore::UnwrapMethod unwrapMethod = params.unwrapMethod;
+
+                    params              = RockCore::MakeRockPreset(preset, seed);
+                    params.textureSize  = textureSize;
+                    params.unwrapMethod = unwrapMethod;
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::EndCombo();
+        }
+
+        //--------------------------------------------------------------------
+        //! 破断面のつまみを描きます。
+        //!
+        //! ここが岩を岩に見せている。planeCutCount を 0 にすると
+        //! fBm だけの丸い塊へ退化する。
+        //!
+        //! @param [in,out] params 岩のパラメータ
+        //--------------------------------------------------------------------
+        void DrawFractureControls(RockCore::RockParams& params) {
+            ImGui::TextUnformatted(Tr(UiText::HeadingFracture));
+
+            ImGui::SliderInt(Tr(UiText::LabelPlaneCutCount), &params.planeCutCount, 0, 16);
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipPlaneCutCount));
+
+            ImGui::SliderFloat(Tr(UiText::LabelPlaneCutDepth), &params.planeCutDepth, 0.0f, 0.7f, "%.2f");
+
+            ImGui::SliderFloat(Tr(UiText::LabelPlaneAxisBias), &params.planeAxisBias, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipPlaneAxisBias));
+
+            ImGui::SliderFloat(Tr(UiText::LabelEdgeRounding), &params.edgeRounding, 0.0f, 0.8f, "%.3f");
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipEdgeRounding));
+
+            ImGui::SliderFloat(Tr(UiText::LabelCreaseAngle), &params.creaseAngleDeg, 5.0f, 90.0f, "%.0f deg");
+            ImGui::SetItemTooltip("%s", Tr(UiText::TipCreaseAngle));
         }
 
         //--------------------------------------------------------------------
@@ -72,6 +215,10 @@ namespace RockEditor {
             return;
         }
 
+        DrawPresetControl(params);
+
+        ImGui::Separator();
+
         DrawSeedControl(params.seed);
 
         ImGui::SliderFloat(Tr(UiText::LabelRadius), &params.radius, 0.05f, 3.0f, "%.3f");
@@ -93,6 +240,9 @@ namespace RockEditor {
         ImGui::SetItemTooltip("%s", Tr(UiText::TipNyquist));
 
         ImGui::Separator();
+        DrawFractureControls(params);
+
+        ImGui::Separator();
         ImGui::TextUnformatted(Tr(UiText::HeadingNoiseLayers));
 
         for(size_t i = 0; i < params.noiseLayers.size(); ++i) {
@@ -104,11 +254,39 @@ namespace RockEditor {
             ImGui::PushID(static_cast<int>(i));
             if(ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::Checkbox(Tr(UiText::LabelEnabled), &layer.enabled);
+
+                if(ImGui::BeginCombo(Tr(UiText::LabelLayerKind), TranslateLayerKind(layer.kind))) {
+                    constexpr RockCore::NoiseLayerKind kKinds[] = {
+                        RockCore::NoiseLayerKind::Fbm,
+                        RockCore::NoiseLayerKind::Worley,
+                        RockCore::NoiseLayerKind::Ridged,
+                    };
+
+                    for(const RockCore::NoiseLayerKind kind : kKinds) {
+                        ImGui::PushID(static_cast<int>(kind));
+                        if(ImGui::Selectable(TranslateLayerKind(kind), kind == layer.kind)) {
+                            layer.kind = kind;
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndCombo();
+                }
+
                 ImGui::SliderFloat(Tr(UiText::LabelAmplitude), &layer.amplitude, 0.0f, 0.6f, "%.3f");
                 ImGui::SliderFloat(Tr(UiText::LabelFrequency), &layer.fbm.frequency, 0.2f, 12.0f, "%.2f");
-                ImGui::SliderInt(Tr(UiText::LabelOctaves), &layer.fbm.octaves, 1, 10);
-                ImGui::SliderFloat(Tr(UiText::LabelLacunarity), &layer.fbm.lacunarity, 1.5f, 3.0f, "%.2f");
-                ImGui::SliderFloat(Tr(UiText::LabelGain), &layer.fbm.gain, 0.2f, 0.8f, "%.2f");
+
+                // Worley はセルを1段しか使わないので、オクターブ系のつまみは出さない
+                if(layer.kind != RockCore::NoiseLayerKind::Worley) {
+                    ImGui::SliderInt(Tr(UiText::LabelOctaves), &layer.fbm.octaves, 1, 10);
+                    ImGui::SliderFloat(Tr(UiText::LabelLacunarity), &layer.fbm.lacunarity, 1.5f, 3.0f, "%.2f");
+                    ImGui::SliderFloat(Tr(UiText::LabelGain), &layer.fbm.gain, 0.2f, 0.8f, "%.2f");
+                }
+
+                if(layer.kind != RockCore::NoiseLayerKind::Fbm) {
+                    ImGui::SliderFloat(Tr(UiText::LabelSharpness), &layer.sharpness, 0.05f, 1.0f, "%.2f");
+                    ImGui::SetItemTooltip("%s", Tr(UiText::TipSharpness));
+                }
+
                 ImGui::TreePop();
             }
             ImGui::PopID();
@@ -121,9 +299,6 @@ namespace RockEditor {
         if(ImGui::Button(Tr(UiText::ButtonRemoveLayer)) && params.noiseLayers.size() > 1) {
             params.noiseLayers.pop_back();
         }
-
-        ImGui::Separator();
-        DrawNote(Tr(UiText::NotePhase3Shape));
 
         ImGui::End();
     }
@@ -142,6 +317,10 @@ namespace RockEditor {
         ImGui::ColorEdit3(Tr(UiText::LabelBaseColor), &params.baseColor.x);
         ImGui::SliderFloat(Tr(UiText::LabelRoughness), &params.roughness, 0.0f, 1.0f, "%.2f");
         DrawNote(Tr(UiText::NoteMetallicFixed));
+
+        ImGui::Separator();
+
+        DrawUnwrapControls(params);
 
         ImGui::Separator();
 
@@ -225,8 +404,27 @@ namespace RockEditor {
         ImGui::Text(Tr(UiText::FormatTriangles), snapshot.mesh.triangleCount);
         ImGui::Text(Tr(UiText::FormatSubdivisions), snapshot.mesh.subdivisions);
         ImGui::Text(Tr(UiText::FormatMaxEdge), snapshot.mesh.actualEdgeLength);
+        ImGui::Text(Tr(UiText::FormatCutPlanes), snapshot.mesh.cutPlaneCount);
+        ImGui::Text(Tr(UiText::FormatSplitVertices), snapshot.unwrap.splitVertexCount);
 
         ImGui::Separator();
+
+        //--------------------------------------------------------------------
+        // 実際に使われた展開器を出す。
+        //
+        // 対話中は八面体射影へ落ちるので、ここが選んだ方式と食い違うのは正常。
+        // xatlas がアトラス 1 枚に収められず落ちた場合だけ注意書きを出す
+        //--------------------------------------------------------------------
+        ImGui::Text(Tr(UiText::FormatUnwrapMethod),
+                    (snapshot.unwrap.methodName[0] != '\0') ? snapshot.unwrap.methodName : "-");
+
+        if(snapshot.unwrap.chartCount > 0) {
+            ImGui::Text(Tr(UiText::FormatChartCount), snapshot.unwrap.chartCount);
+            ImGui::Text(Tr(UiText::FormatAtlasUtilization), snapshot.unwrap.utilization * 100.0f);
+        }
+        if(snapshot.unwrap.fellBack) {
+            DrawNote(Tr(UiText::NoteUnwrapFellBack));
+        }
 
         const int texelTotal = snapshot.textureSize * snapshot.textureSize;
         const float coverage = (texelTotal > 0) ? (static_cast<float>(snapshot.coveredTexels) / static_cast<float>(texelTotal)) : 0.0f;

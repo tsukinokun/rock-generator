@@ -14,7 +14,13 @@
 //!           2. 決定論。同じ seed から2回生成してビット一致するか
 //!           3. ダーティ判定。色だけ変えたときに Unwrap と Bake が走らないか
 //!           4. UV 展開とベイク。被覆率・UV の範囲・縮退テクセル数
-//!           5. RockParams の JSON 往復
+//!           5. xatlas。チャートが重なっていないか、アトラス 1 枚に収まったか、
+//!              展開後もハードエッジが残っているか、スレッドを起こしても
+//!              決定論が保たれるか
+//!           6. メッシュの健全性。閉じているか、退化が無いか、破断面が
+//!              実エッジとして乗っているか（半空間クリップの穴埋めの検証）
+//!           7. 4 プリセットが完走し、決定論を保つか
+//!           8. RockParams の JSON 往復
 //----------------------------------------------------------------------------
 #include <RockCore/Bake/Dilate.hpp>
 #include <RockCore/Bake/NormalBaker.hpp>
@@ -23,10 +29,17 @@
 #include <RockCore/Io/RockParamsJson.hpp>
 #include <RockCore/Pipeline/Pipeline.hpp>
 #include <RockCore/Random/Pcg32.hpp>
+#include <RockCore/Shape/RockPresets.hpp>
 
+#include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 using namespace RockCore;
 
@@ -207,6 +220,10 @@ namespace {
 
     void TestUnwrapCoverage() {
         Pipeline pipeline;
+
+        // 方式を明示する。既定は xatlas だが、この検査は八面体射影の
+        // シーム処理（正方形の縁をまたぐ三角形の複製）を見るためのもの
+        pipeline.GetMutableParams().unwrapMethod     = UnwrapMethod::Octahedral;
         pipeline.GetMutableParams().textureSize      = 256;
         pipeline.GetMutableParams().targetEdgeLength = 0.05f;
         pipeline.SetTargetStage(PipelineStage::BakeNormal);
@@ -245,6 +262,509 @@ namespace {
         Check(pipeline.GetNormalBakeStats().degenerateTexels * 100u < gbuffer.GetCoveredTexelCount(),
               "degenerate TBN texels are under 1% of the atlas");
         Check(nonFlat > texels / 10u, "the normal map actually carries detail");
+    }
+
+    //------------------------------------------------------------------------
+    //! 位置からハッシュを作ります。
+    //!
+    //! 辺を頂点番号ではなく**位置**で数えるために使います。ハードエッジ化で
+    //! 頂点を複製してあるので、番号で見ると稜線の辺が共有されていないように
+    //! 見えてしまいます。複製した頂点は位置がビット単位で同じなので、
+    //! 位置を鍵にすれば正しく繋がります。
+    //!
+    //! @param  [in] p 位置
+    //! @return ハッシュ値
+    //------------------------------------------------------------------------
+    u64 HashPosition(const Vec3& p) {
+        u64 hash = 0xCBF29CE484222325ull;
+
+        const float components[3] = {p.x, p.y, p.z};
+        for(const float value : components) {
+            u32 bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+
+            hash ^= static_cast<u64>(bits);
+            hash *= 0x100000001B3ull;
+        }
+        return hash;
+    }
+
+    //------------------------------------------------------------------------
+    //! 辺の鍵を作ります。向きは問いません。
+    //! @param  [in] a 片方の位置
+    //! @param  [in] b もう片方の位置
+    //! @return 辺の鍵
+    //------------------------------------------------------------------------
+    u64 MakePositionEdgeKey(const Vec3& a, const Vec3& b) {
+        const u64 hashA = HashPosition(a);
+        const u64 hashB = HashPosition(b);
+        return (hashA < hashB) ? (hashA * 31u + hashB) : (hashB * 31u + hashA);
+    }
+
+    void TestMeshIntegrity() {
+        Pipeline pipeline;
+        pipeline.GetMutableParams().textureSize = 128;
+        pipeline.SetTargetStage(PipelineStage::Mesh);
+        pipeline.Update(nullptr, nullptr);
+
+        // UV 展開前のメッシュを見る。展開とハードエッジ化は頂点を複製するので、
+        // クリップが位相を壊していないかを見たいならこちら
+        const MeshBuilder&   mesh  = pipeline.GetBaseMesh();
+        const RockMeshStats& stats = pipeline.GetMeshStats();
+
+        std::printf("       cut planes=%u vertices=%u triangles=%u\n",
+                    stats.cutPlaneCount,
+                    mesh.GetVertexCount(),
+                    mesh.GetTriangleCount());
+
+        Check(stats.cutPlaneCount > 0, "the default rock actually has fracture planes");
+
+        //--------------------------------------------------------------------
+        // 閉じているか。辺はちょうど 2 枚の三角形に共有されていなければならない。
+        // クリップの切り口を塞ぎ損ねると即ここで落ちる
+        //--------------------------------------------------------------------
+        std::unordered_map<u64, int> edgeUseCount;
+        edgeUseCount.reserve(mesh.indices.size());
+
+        for(size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            for(int corner = 0; corner < 3; ++corner) {
+                const Vec3& a = mesh.positions[mesh.indices[i + static_cast<size_t>(corner)]];
+                const Vec3& b = mesh.positions[mesh.indices[i + static_cast<size_t>((corner + 1) % 3)]];
+
+                ++edgeUseCount[MakePositionEdgeKey(a, b)];
+            }
+        }
+
+        int openEdges   = 0;
+        int nonManifold = 0;
+        for(const auto& entry : edgeUseCount) {
+            if(entry.second == 1) {
+                ++openEdges;
+            } else if(entry.second > 2) {
+                ++nonManifold;
+            }
+        }
+
+        std::printf("       edges=%zu open=%d non-manifold=%d\n", edgeUseCount.size(), openEdges, nonManifold);
+        Check(openEdges == 0, "the mesh is closed (no open edges after clipping)");
+        Check(nonManifold == 0, "the mesh is manifold (no edge shared by more than two triangles)");
+
+        //--------------------------------------------------------------------
+        // 面積 0 の三角形が無いか
+        //--------------------------------------------------------------------
+        //--------------------------------------------------------------------
+        // しきい値は xatlas に合わせてある。
+        //
+        // xatlas は面積が FLT_EPSILON 以下の面を「無効な面」として扱い、
+        // チャートへ入れずに UV (0,0) のまま返してくる（xatlas.cpp:9173 の
+        // kAreaEpsilon）。それを通すとアトラスの原点へ伸びる巨大な三角形が
+        // できてベイクが壊れるので、ここを xatlas より緩くしてはいけない。
+        //
+        // 以前は 1e-12 だった。面積 1e-12〜1e-7 の針のような三角形が残り、
+        // 「退化は 0 件」と出ているのに xatlas だけが落ちる状態になっていた
+        //--------------------------------------------------------------------
+        int   degenerate = 0;
+        float minArea    = std::numeric_limits<float>::max();
+
+        // 一番細い三角形の辺の長さ。辺の縮めで直せるのか
+        // （＝短い辺があるのか）を判断するために出す
+        float worstShortEdge = 0.0f;
+        float worstLongEdge  = 0.0f;
+
+        for(size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            const Vec3& a = mesh.positions[mesh.indices[i]];
+            const Vec3& b = mesh.positions[mesh.indices[i + 1]];
+            const Vec3& c = mesh.positions[mesh.indices[i + 2]];
+
+            const float area = Length(Cross(b - a, c - a)) * 0.5f;
+
+            if(area < minArea) {
+                minArea = area;
+
+                const float ab = Length(b - a);
+                const float bc = Length(c - b);
+                const float ca = Length(a - c);
+
+                worstShortEdge = std::min(std::min(ab, bc), ca);
+                worstLongEdge  = std::max(std::max(ab, bc), ca);
+            }
+            if(area <= FLT_EPSILON) {
+                ++degenerate;
+            }
+        }
+        std::printf("       degenerate triangles = %d  (min area = %.3e, xatlas rejects <= %.3e)\n",
+                    degenerate,
+                    minArea,
+                    FLT_EPSILON);
+        std::printf("       thinnest triangle: shortest edge = %.3e, longest edge = %.3e\n",
+                    worstShortEdge,
+                    worstLongEdge);
+        Check(degenerate == 0, "no triangle is small enough for xatlas to reject");
+
+        //--------------------------------------------------------------------
+        // 平らな面が実際にできているか。
+        //
+        // 隣り合う三角形の法線がほぼ一致する組が一定数あれば、破断面が
+        // メッシュの実エッジとして乗っている証拠になる
+        //--------------------------------------------------------------------
+        const u32 triangleCount = mesh.GetTriangleCount();
+
+        std::vector<Vec3> faceNormals(triangleCount);
+        for(u32 t = 0; t < triangleCount; ++t) {
+            const size_t base = static_cast<size_t>(t) * 3u;
+            faceNormals[t] =
+                Normalize(Cross(mesh.positions[mesh.indices[base + 1]] - mesh.positions[mesh.indices[base]],
+                                mesh.positions[mesh.indices[base + 2]] - mesh.positions[mesh.indices[base]]));
+        }
+
+        std::unordered_map<u64, u32> edgeFirstFace;
+        int                          coplanarPairs = 0;
+        int                          adjacentPairs = 0;
+
+        for(u32 t = 0; t < triangleCount; ++t) {
+            const size_t base = static_cast<size_t>(t) * 3u;
+            for(int corner = 0; corner < 3; ++corner) {
+                const Vec3& a = mesh.positions[mesh.indices[base + static_cast<size_t>(corner)]];
+                const Vec3& b = mesh.positions[mesh.indices[base + static_cast<size_t>((corner + 1) % 3)]];
+
+                const u64  key   = MakePositionEdgeKey(a, b);
+                const auto found = edgeFirstFace.find(key);
+                if(found == edgeFirstFace.end()) {
+                    edgeFirstFace[key] = t;
+                    continue;
+                }
+
+                ++adjacentPairs;
+                if(Dot(faceNormals[t], faceNormals[found->second]) > 0.9995f) {
+                    ++coplanarPairs;
+                }
+            }
+        }
+
+        const float coplanarRatio =
+            (adjacentPairs > 0) ? (static_cast<float>(coplanarPairs) / static_cast<float>(adjacentPairs)) : 0.0f;
+        std::printf("       coplanar adjacent pairs = %.1f %%\n", coplanarRatio * 100.0f);
+        Check(coplanarRatio > 0.05f, "flat fracture faces exist in the mesh");
+    }
+
+    void TestPresets() {
+        for(u32 i = 0; i < kRockPresetCount; ++i) {
+            const RockPreset preset = static_cast<RockPreset>(i);
+
+            Pipeline a;
+            Pipeline b;
+
+            a.GetMutableParams()             = MakeRockPreset(preset, 4242u);
+            b.GetMutableParams()             = MakeRockPreset(preset, 4242u);
+            a.GetMutableParams().textureSize = 128;
+            b.GetMutableParams().textureSize = 128;
+            a.SetTargetStage(PipelineStage::BakeNormal);
+            b.SetTargetStage(PipelineStage::BakeNormal);
+
+            const bool okA = a.Update(nullptr, nullptr);
+            const bool okB = b.Update(nullptr, nullptr);
+
+            std::printf("       %-10s tris=%u planes=%u split=%u\n",
+                        GetRockPresetName(preset),
+                        a.GetMesh().GetTriangleCount(),
+                        a.GetMeshStats().cutPlaneCount,
+                        a.GetUnwrapStats().splitVertexCount);
+
+            char label[96];
+            std::snprintf(label, sizeof(label), "preset %s completes and is deterministic", GetRockPresetName(preset));
+
+            Check(okA && okB && a.GetMesh().indices == b.GetMesh().indices &&
+                      a.GetNormalMap().GetPixels() == b.GetNormalMap().GetPixels(),
+                  label);
+        }
+    }
+
+    //------------------------------------------------------------------------
+    //! UV 空間で 2 枚以上の三角形に覆われたテクセルの数を数えます。
+    //!
+    //! チャートが重なると、そこへ別々の面の法線が順に焼かれて後から来た方が
+    //! 勝ちます。見た目には「一部の面だけ他人の法線を貼っている」という形で
+    //! 出るので気付きにくい。八面体射影は星形保証から重なり得ませんが、
+    //! xatlas の詰め込みは余白の取り方次第で重なるため、ここで数えます。
+    //!
+    //! 辺の上のテクセルは厳密な内側判定（辺関数が3つとも正）から外れるので、
+    //! どちらの三角形にも数えません。隣り合う三角形を重なりと誤検出しない
+    //! ためにそうしてあります。
+    //!
+    //! @param  [in] mesh        対象のメッシュ
+    //! @param  [in] textureSize テクスチャの一辺
+    //! @return 2 回以上覆われたテクセル数
+    //------------------------------------------------------------------------
+    u32 CountOverlappingTexels(const MeshBuilder& mesh, int textureSize) {
+        if(mesh.uvs.size() != mesh.positions.size() || textureSize <= 0) {
+            return 0;
+        }
+
+        const int       size  = textureSize;
+        std::vector<u8> hits(static_cast<size_t>(size) * static_cast<size_t>(size), 0u);
+
+        u32 overlapping = 0;
+
+        const float scale = static_cast<float>(size);
+
+        for(size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            const Vec2& uv0 = mesh.uvs[mesh.indices[i]];
+            const Vec2& uv1 = mesh.uvs[mesh.indices[i + 1]];
+            const Vec2& uv2 = mesh.uvs[mesh.indices[i + 2]];
+
+            const Vec2 p0{uv0.x * scale, uv0.y * scale};
+            const Vec2 p1{uv1.x * scale, uv1.y * scale};
+            const Vec2 p2{uv2.x * scale, uv2.y * scale};
+
+            // 巻き方向は三角形ごとに違い得る（UV が鏡像のチャートがある）ので、
+            // 符号付き面積で揃えてから内外を見る
+            const float area = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
+            if(std::abs(area) < 1e-9f) {
+                continue;
+            }
+            const float orient = (area < 0.0f) ? -1.0f : 1.0f;
+
+            const int minX = std::max(static_cast<int>(std::floor(std::min(std::min(p0.x, p1.x), p2.x))), 0);
+            const int maxX = std::min(static_cast<int>(std::ceil(std::max(std::max(p0.x, p1.x), p2.x))), size - 1);
+            const int minY = std::max(static_cast<int>(std::floor(std::min(std::min(p0.y, p1.y), p2.y))), 0);
+            const int maxY = std::min(static_cast<int>(std::ceil(std::max(std::max(p0.y, p1.y), p2.y))), size - 1);
+
+            for(int y = minY; y <= maxY; ++y) {
+                for(int x = minX; x <= maxX; ++x) {
+                    const float px = static_cast<float>(x) + 0.5f;
+                    const float py = static_cast<float>(y) + 0.5f;
+
+                    const float e0 = ((p1.x - p0.x) * (py - p0.y) - (px - p0.x) * (p1.y - p0.y)) * orient;
+                    const float e1 = ((p2.x - p1.x) * (py - p1.y) - (px - p1.x) * (p2.y - p1.y)) * orient;
+                    const float e2 = ((p0.x - p2.x) * (py - p2.y) - (px - p2.x) * (p0.y - p2.y)) * orient;
+
+                    if(e0 <= 0.0f || e1 <= 0.0f || e2 <= 0.0f) {
+                        continue;
+                    }
+
+                    u8& hit = hits[static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)];
+                    if(hit == 1u) {
+                        ++overlapping;
+                    }
+                    if(hit < 2u) {
+                        ++hit;
+                    }
+                }
+            }
+        }
+
+        return overlapping;
+    }
+
+    //------------------------------------------------------------------------
+    //! 辺がちょうど 2 枚の三角形に共有されているかを調べます。
+    //! @param  [in] mesh 対象のメッシュ
+    //! @return すべての辺が 2 枚に共有されていれば true
+    //------------------------------------------------------------------------
+    bool IsClosedByPosition(const MeshBuilder& mesh) {
+        std::unordered_map<u64, int> edgeUseCount;
+        edgeUseCount.reserve(mesh.indices.size());
+
+        for(size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            for(int corner = 0; corner < 3; ++corner) {
+                const Vec3& a = mesh.positions[mesh.indices[i + static_cast<size_t>(corner)]];
+                const Vec3& b = mesh.positions[mesh.indices[i + static_cast<size_t>((corner + 1) % 3)]];
+                ++edgeUseCount[MakePositionEdgeKey(a, b)];
+            }
+        }
+
+        for(const auto& entry : edgeUseCount) {
+            if(entry.second != 2) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    //------------------------------------------------------------------------
+    //! テクセル密度のばらつきを測ります。
+    //!
+    //! 三角形ごとの「UV 面積 / 3D 面積」がテクセル密度の 2 乗にあたります。
+    //! これが方向によって大きく変わると、同じ岩なのに面ごとに Normal マップの
+    //! 細かさが違って見えます。xatlas を入れた理由がここなので、
+    //! 「被覆率は落ちたが密度は揃った」ことを数字で残せるようにしておきます。
+    //!
+    //! 中央値に対する 5〜95 パーセンタイルの比を返します。1.0 が完全に均一。
+    //! 最大／最小ではなく分位点を見るのは、切り口の縁にできる極小の三角形が
+    //! 1 枚混じるだけで最大値が跳ね、指標として使えなくなるためです。
+    //!
+    //! @param  [in] mesh 測るメッシュ
+    //! @param  [out] outLow  中央値に対する 5 パーセンタイルの比
+    //! @param  [out] outHigh 中央値に対する 95 パーセンタイルの比
+    //------------------------------------------------------------------------
+    void MeasureTexelDensitySpread(const MeshBuilder& mesh, float& outLow, float& outHigh) {
+        outLow  = 0.0f;
+        outHigh = 0.0f;
+
+        if(mesh.uvs.size() != mesh.positions.size()) {
+            return;
+        }
+
+        std::vector<float> density;
+        density.reserve(mesh.indices.size() / 3);
+
+        for(size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            const u32 ia = mesh.indices[i];
+            const u32 ib = mesh.indices[i + 1];
+            const u32 ic = mesh.indices[i + 2];
+
+            const float area3d = Length(Cross(mesh.positions[ib] - mesh.positions[ia],
+                                              mesh.positions[ic] - mesh.positions[ia]));
+
+            const Vec2 uvAb{mesh.uvs[ib].x - mesh.uvs[ia].x, mesh.uvs[ib].y - mesh.uvs[ia].y};
+            const Vec2 uvAc{mesh.uvs[ic].x - mesh.uvs[ia].x, mesh.uvs[ic].y - mesh.uvs[ia].y};
+
+            const float areaUv = std::abs(uvAb.x * uvAc.y - uvAc.x * uvAb.y);
+
+            if(area3d <= 0.0f || areaUv <= 0.0f) {
+                continue;
+            }
+            density.push_back(std::sqrt(areaUv / area3d));
+        }
+
+        if(density.size() < 20u) {
+            return;
+        }
+
+        std::sort(density.begin(), density.end());
+
+        const size_t count  = density.size();
+        const float  median = density[count / 2];
+        if(median <= 0.0f) {
+            return;
+        }
+
+        outLow  = density[count / 20] / median;
+        outHigh = density[(count * 19) / 20] / median;
+    }
+
+    void TestXAtlasUnwrap() {
+        constexpr int kTextureSize = 256;
+
+        //--------------------------------------------------------------------
+        // 同じ形を 2 つの方式で展開して比べる。
+        //
+        // 形は共通なので、違うのは UV だけ。被覆率の差がそのまま
+        // 「テクセルをどれだけ使えているか」の差になる
+        //--------------------------------------------------------------------
+        const auto build = [](UnwrapMethod method, Pipeline& pipeline) {
+            pipeline.GetMutableParams().unwrapMethod     = method;
+            pipeline.GetMutableParams().textureSize      = kTextureSize;
+            pipeline.GetMutableParams().targetEdgeLength = 0.05f;
+            pipeline.SetTargetStage(PipelineStage::BakeNormal);
+            return pipeline.Update(nullptr, nullptr);
+        };
+
+        Pipeline octahedral;
+        Pipeline atlas;
+
+        const bool okOctahedral = build(UnwrapMethod::Octahedral, octahedral);
+        const bool okAtlas      = build(UnwrapMethod::XAtlas, atlas);
+
+        Check(okOctahedral && okAtlas, "both unwrappers complete");
+
+        const UnwrapStats& stats = atlas.GetUnwrapStats();
+        const MeshBuilder& mesh  = atlas.GetMesh();
+
+        std::printf("       method=%s charts=%u utilization=%.1f%% split=%u\n",
+                    (stats.methodName[0] != '\0') ? stats.methodName : "-",
+                    stats.chartCount,
+                    stats.utilization * 100.0f,
+                    stats.splitVertexCount);
+
+        if(stats.fellBack) {
+            std::printf("       fell back because: %s\n",
+                        stats.failureReason ? stats.failureReason : "(no reason recorded)");
+        }
+        Check(!stats.fellBack, "xatlas packed a single atlas without falling back");
+        Check(stats.chartCount > 0, "xatlas produced charts");
+        Check(mesh.uvs.size() == mesh.positions.size() && mesh.normals.size() == mesh.positions.size(),
+              "uv and normal counts match the vertex count");
+
+        bool uvInRange = true;
+        for(const Vec2& uv : mesh.uvs) {
+            if(uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f) {
+                uvInRange = false;
+                break;
+            }
+        }
+        Check(uvInRange, "all xatlas UVs are inside [0,1]");
+
+        //--------------------------------------------------------------------
+        // ハードエッジが残っているか。
+        //
+        // 分割を展開より後へ移したので、ここが 0 だと「稜線が法線の補間で
+        // 丸められた状態」に戻っている。順序を入れ替えた回帰がここで出る
+        //--------------------------------------------------------------------
+        Check(stats.splitVertexCount > 0, "hard edges are split after the unwrap");
+
+        //--------------------------------------------------------------------
+        // 位相。xatlas はシームで頂点を複製するが、面は増やさないので
+        // 位置で見れば閉じたままでなければならない
+        //--------------------------------------------------------------------
+        Check(IsClosedByPosition(mesh), "the unwrapped mesh is still closed by position");
+
+        //--------------------------------------------------------------------
+        // チャートの重なり。1 テクセルでも重なると、そこは 2 つの面の
+        // どちらか片方の法線しか持てない
+        //--------------------------------------------------------------------
+        const u32 overlapping = CountOverlappingTexels(mesh, kTextureSize);
+        std::printf("       overlapping texels = %u\n", overlapping);
+        Check(overlapping == 0u, "no texel is claimed by two charts");
+
+        //--------------------------------------------------------------------
+        // 被覆率。xatlas を入れた目的がこれなので数字で残す
+        //--------------------------------------------------------------------
+        const u32   texels          = static_cast<u32>(kTextureSize) * static_cast<u32>(kTextureSize);
+        const float octaCoverage    = static_cast<float>(octahedral.GetBakeGBuffer().GetCoveredTexelCount()) /
+                                   static_cast<float>(texels);
+        const float atlasCoverage = static_cast<float>(atlas.GetBakeGBuffer().GetCoveredTexelCount()) /
+                                    static_cast<float>(texels);
+
+        std::printf("       UV coverage octahedral=%.1f%% xatlas=%.1f%%\n",
+                    octaCoverage * 100.0f,
+                    atlasCoverage * 100.0f);
+        Check(atlasCoverage > 0.3f, "the xatlas atlas covers a reasonable share of the texture");
+
+        //--------------------------------------------------------------------
+        // テクセル密度のばらつき。xatlas を入れた理由はここ。
+        //
+        // 八面体射影は正方形の対角へ向いた面のテクセル密度が落ちるので、
+        // 被覆率では勝っていても「面ごとに Normal マップの細かさが違う」
+        // という形で出る。被覆率と引き換えに何を得たのかを数字で残す
+        //--------------------------------------------------------------------
+        float octaLow  = 0.0f;
+        float octaHigh = 0.0f;
+        MeasureTexelDensitySpread(octahedral.GetMesh(), octaLow, octaHigh);
+
+        float atlasLow  = 0.0f;
+        float atlasHigh = 0.0f;
+        MeasureTexelDensitySpread(mesh, atlasLow, atlasHigh);
+
+        std::printf("       texel density (5%%..95%% of median) octahedral=%.2f..%.2f xatlas=%.2f..%.2f\n",
+                    octaLow,
+                    octaHigh,
+                    atlasLow,
+                    atlasHigh);
+        Check((atlasHigh - atlasLow) < (octaHigh - octaLow),
+              "xatlas spreads texel density less than octahedral projection");
+
+        //--------------------------------------------------------------------
+        // 決定論。xatlas は内部でスレッドを起こすので、ここは念入りに見る。
+        // スレッド数に結果が依存していたら、焼き直すたびに法線が変わる
+        //--------------------------------------------------------------------
+        Pipeline repeat;
+        const bool okRepeat = build(UnwrapMethod::XAtlas, repeat);
+
+        Check(okRepeat && repeat.GetMesh().indices == mesh.indices &&
+                  repeat.GetMesh().GetVertexCount() == mesh.GetVertexCount() &&
+                  repeat.GetNormalMap().GetPixels() == atlas.GetNormalMap().GetPixels(),
+              "xatlas is deterministic");
     }
 
     void TestJsonRoundTrip() {
@@ -289,6 +809,12 @@ int RunCoreVerification() {
     TestDirtyFlags();
     std::printf("--- Unwrap / Bake ---\n");
     TestUnwrapCoverage();
+    std::printf("--- xatlas ---\n");
+    TestXAtlasUnwrap();
+    std::printf("--- Mesh integrity ---\n");
+    TestMeshIntegrity();
+    std::printf("--- Presets ---\n");
+    TestPresets();
     std::printf("--- JSON ---\n");
     TestJsonRoundTrip();
 

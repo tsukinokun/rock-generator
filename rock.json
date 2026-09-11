@@ -1,0 +1,71 @@
+{
+    "rockParams": {
+        "seed": 12345,
+        "radius": 0.5,
+        "anisoScale": {
+            "x": 1.0,
+            "y": 1.0,
+            "z": 1.0
+        },
+        "targetEdgeLength": 0.03500000014901161,
+        "baseSubdivision": 2,
+        "noiseLayers": [
+            {
+                "enabled": true,
+                "kind": 0,
+                "amplitude": 0.03500000014901161,
+                "sharpness": 0.5,
+                "fbm": {
+                    "frequency": 1.2999999523162842,
+                    "octaves": 4,
+                    "lacunarity": 2.0,
+                    "gain": 0.44999998807907107
+                }
+            },
+            {
+                "enabled": true,
+                "kind": 1,
+                "amplitude": 0.014000000432133675,
+                "sharpness": 0.07000000029802323,
+                "fbm": {
+                    "frequency": 1.7999999523162842,
+                    "octaves": 1,
+                    "lacunarity": 2.0,
+                    "gain": 0.5
+                }
+            },
+            {
+                "enabled": true,
+                "kind": 0,
+                "amplitude": 0.01600000075995922,
+                "sharpness": 0.5,
+                "fbm": {
+                    "frequency": 6.5,
+                    "octaves": 3,
+                    "lacunarity": 2.0,
+                    "gain": 0.44999998807907107
+                }
+            }
+        ],
+        "planeCutCount": 8,
+        "planeCutDepth": 0.46000000834465029,
+        "planeAxisBias": 0.0,
+        "edgeRounding": 0.09000000357627869,
+        "creaseAngleDeg": 35.0,
+        "unwrapMethod": 1,
+        "texelsPerUnit": 0.0,
+        "uvPadding": 4,
+        "textureSize": 1024,
+        "dilatePasses": 12,
+        "bakeMaxFrequency": 0.0,
+        "baseColor": {
+            "x": 0.46000000834465029,
+            "y": 0.4399999976158142,
+            "z": 0.41999998688697817
+        },
+        "roughness": 0.7200000286102295,
+        "metallic": 0.0,
+        "aoRayCount": 48,
+        "aoDistance": 0.15000000596046449
+    }
+}

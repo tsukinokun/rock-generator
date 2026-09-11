@@ -62,6 +62,7 @@ namespace RockCore {
         ar(cereal::make_nvp("enabled", params.enabled),
            cereal::make_nvp("kind", params.kind),
            cereal::make_nvp("amplitude", params.amplitude),
+           cereal::make_nvp("sharpness", params.sharpness),
            cereal::make_nvp("fbm", params.fbm));
     }
 
@@ -81,6 +82,8 @@ namespace RockCore {
            cereal::make_nvp("noiseLayers", params.noiseLayers),
            cereal::make_nvp("planeCutCount", params.planeCutCount),
            cereal::make_nvp("planeCutDepth", params.planeCutDepth),
+           cereal::make_nvp("planeAxisBias", params.planeAxisBias),
+           cereal::make_nvp("edgeRounding", params.edgeRounding),
            cereal::make_nvp("creaseAngleDeg", params.creaseAngleDeg),
            cereal::make_nvp("unwrapMethod", params.unwrapMethod),
            cereal::make_nvp("texelsPerUnit", params.texelsPerUnit),

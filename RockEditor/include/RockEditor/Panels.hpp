@@ -29,8 +29,9 @@ namespace RockEditor {
     //! 読むことで読み書きを分けています。
     //------------------------------------------------------------------------
     struct PipelineSnapshot {
-        RockCore::RockMeshStats                                                    mesh{};
-        RockCore::NormalBakeStats                                                  normal{};
+        RockCore::RockMeshStats                                                  mesh{};
+        RockCore::UnwrapStats                                                    unwrap{};
+        RockCore::NormalBakeStats                                                normal{};
         std::array<RockCore::PipelineStageStatus, RockCore::kPipelineStageCount> stages{};
 
         RockCore::u32 coveredTexels   = 0;

@@ -5,7 +5,9 @@
 #include <RockCore/Pipeline/Pipeline.hpp>
 
 #include <RockCore/Bake/Dilate.hpp>
+#include <RockCore/Mesh/HardEdgeSplit.hpp>
 #include <RockCore/Unwrap/OctahedralUnwrapper.hpp>
+#include <RockCore/Unwrap/XAtlasUnwrapper.hpp>
 
 #include <chrono>
 #include <type_traits>
@@ -66,6 +68,7 @@ namespace RockCore {
                 hasher.Mix(layer.enabled);
                 hasher.Mix(layer.kind);
                 hasher.Mix(layer.amplitude);
+                hasher.Mix(layer.sharpness);
                 hasher.Mix(layer.fbm.frequency);
                 hasher.Mix(layer.fbm.octaves);
                 hasher.Mix(layer.fbm.lacunarity);
@@ -165,6 +168,13 @@ namespace RockCore {
         fieldHasher.Mix(m_params.anisoScale);
         fieldHasher.Mix(m_params.targetEdgeLength);
         fieldHasher.Mix(m_params.bakeMaxFrequency);
+
+        // 破断面は半径関数そのものなので Field 段に属する。
+        // ここへ混ぜ忘れるとスライダを動かしても形が変わらない
+        fieldHasher.Mix(m_params.planeCutCount);
+        fieldHasher.Mix(m_params.planeCutDepth);
+        fieldHasher.Mix(m_params.planeAxisBias);
+        fieldHasher.Mix(m_params.edgeRounding);
         MixNoiseLayers(fieldHasher, m_params.noiseLayers);
         m_currentHash[static_cast<size_t>(PipelineStage::Field)] = fieldHasher.Get();
 
@@ -181,10 +191,18 @@ namespace RockCore {
         //--------------------------------------------------------------------
         Hasher unwrapHasher;
         unwrapHasher.Mix(m_currentHash[static_cast<size_t>(PipelineStage::Mesh)]);
-        unwrapHasher.Mix(m_params.unwrapMethod);
+
+        // params.unwrapMethod ではなく「実際に使う方式」を混ぜる。
+        // 対話中は八面体射影へ落ちるので、そのまま混ぜるとスライダを
+        // 離した瞬間に「もう完了している」と判断されて xatlas が走らない
+        unwrapHasher.Mix(GetEffectiveUnwrapMethod());
         unwrapHasher.Mix(m_params.texelsPerUnit);
         unwrapHasher.Mix(m_params.uvPadding);
         unwrapHasher.Mix(m_params.textureSize);
+
+        // クリース角は法線と頂点の複製にしか効かない。ハードエッジ化は
+        // UV 展開の後段に置いてあるので Unwrap 段に属する
+        unwrapHasher.Mix(m_params.creaseAngleDeg);
         m_currentHash[static_cast<size_t>(PipelineStage::Unwrap)] = unwrapHasher.Get();
 
         //--------------------------------------------------------------------
@@ -206,6 +224,79 @@ namespace RockCore {
         for(size_t i = 0; i < kPipelineStageCount; ++i) {
             m_status[i].dirty = (m_currentHash[i] != m_completedHash[i]);
         }
+    }
+
+    //------------------------------------------------------------------------
+    //! 実際に使う UV 展開の方式を返します。
+    //------------------------------------------------------------------------
+    UnwrapMethod Pipeline::GetEffectiveUnwrapMethod() const {
+        return m_fastPreview ? UnwrapMethod::Octahedral : m_params.unwrapMethod;
+    }
+
+    //------------------------------------------------------------------------
+    //! UV 展開とハードエッジ化を行います。
+    //------------------------------------------------------------------------
+    bool Pipeline::RunUnwrap(const CancelToken* cancel) {
+        //--------------------------------------------------------------------
+        // 必ず展開前の写しから始める。
+        //
+        // 展開もハードエッジ化も頂点を複製するので、一度通したメッシュへ
+        // もう一度かけると頂点が際限なく増える。テクスチャサイズを変えただけの
+        // ときは Mesh 段が走らないため、ここで写し直さないと実際にそうなる
+        //--------------------------------------------------------------------
+        m_mesh = m_baseMesh;
+
+        m_unwrapStats = UnwrapStats{};
+
+        UnwrapSettings settings{};
+        settings.textureSize   = m_params.textureSize;
+        settings.padding       = m_params.uvPadding;
+        settings.texelsPerUnit = m_params.texelsPerUnit;
+
+        bool unwrapped = false;
+
+        if(GetEffectiveUnwrapMethod() == UnwrapMethod::XAtlas) {
+            XAtlasUnwrapper unwrapper;
+            unwrapped = unwrapper.Unwrap(m_mesh, settings, cancel, &m_unwrapStats);
+
+            //----------------------------------------------------------------
+            // 中断と失敗を区別する。中断ならやり直したいので false を返すが、
+            // 失敗（チャートが1枚に収まらない等）は八面体射影で焼き切る。
+            // ここで諦めるとプレビューが真っ平らな法線のままになる
+            //----------------------------------------------------------------
+            if(!unwrapped && cancel && cancel->IsCancelled()) {
+                return false;
+            }
+            if(!unwrapped) {
+                // 理由は残す。これを落とすと「なぜ落ちたか」が
+                // どこにも出なくなり、切り分けができない
+                const char* reason = m_unwrapStats.failureReason;
+
+                m_mesh                      = m_baseMesh;
+                m_unwrapStats               = UnwrapStats{};
+                m_unwrapStats.fellBack      = true;
+                m_unwrapStats.failureReason = reason;
+            }
+        }
+
+        if(!unwrapped) {
+            OctahedralUnwrapper unwrapper;
+            unwrapper.Unwrap(m_mesh, settings, cancel, &m_unwrapStats);
+        }
+
+        //--------------------------------------------------------------------
+        // 稜線をハードエッジにする。
+        //
+        // **展開より後に行うこと。** 先に分割すると稜線の両側が別頂点になって
+        // 法線シームが生まれ、xatlas がそこでチャートを切るため、破断面の数だけ
+        // チャートが増えてアトラスの詰め込みが崩れる。
+        // 後に行えば「位置と UV が同じで法線だけ違う頂点」が増えるだけで、
+        // UV アトラスには一切影響しない
+        //--------------------------------------------------------------------
+        m_unwrapStats.splitVertexCount = SplitHardEdges(m_mesh, m_params.creaseAngleDeg);
+        m_unwrapStats.vertexCount      = m_mesh.GetVertexCount();
+
+        return true;
     }
 
     //------------------------------------------------------------------------
@@ -259,8 +350,8 @@ namespace RockCore {
             }
             const auto begin = Now();
 
-            BuildRockMesh(m_params, *m_lowField, m_mesh, &m_meshStats);
-            ++m_meshRevision;
+            // 出力は m_baseMesh。m_mesh（UV 展開済み）は Unwrap 段が作る
+            BuildRockMesh(m_params, *m_lowField, m_baseMesh, &m_meshStats);
 
             markCompleted(PipelineStage::Mesh, ElapsedMilliseconds(begin));
             ReportProgress(progress, 1.0f, "Mesh");
@@ -275,14 +366,12 @@ namespace RockCore {
         if(shouldRun(PipelineStage::Unwrap)) {
             const auto begin = Now();
 
-            UnwrapSettings settings{};
-            settings.textureSize   = m_params.textureSize;
-            settings.padding       = m_params.uvPadding;
-            settings.texelsPerUnit = m_params.texelsPerUnit;
+            ReportProgress(progress, 0.0f, "Unwrap");
 
-            // xatlas は Phase 3。それまでは方式を選んでも八面体射影で通す
-            OctahedralUnwrapper unwrapper;
-            unwrapper.Unwrap(m_mesh, settings);
+            if(!RunUnwrap(cancel)) {
+                // 中断された。ハッシュを記録しないので次回やり直す
+                return false;
+            }
             ++m_meshRevision;
 
             RasterizeUv(m_mesh, m_params.textureSize, m_gbuffer);

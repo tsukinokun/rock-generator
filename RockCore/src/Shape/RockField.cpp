@@ -30,6 +30,29 @@ namespace RockCore {
         constexpr float kInvSqrt3 = 0.57735027f;
 
         //--------------------------------------------------------------------
+        //! 多項式の smooth minimum。
+        //!
+        //! min をそのまま使うと破断面どうしの境目が数学的に鋭い折れ目になる。
+        //! 実物の岩は角から先に風化して丸くなるので、ここを滑らかに繋ぐと
+        //! 「割れたて」と「風化した露岩」が k 1本で連続に繋がる。
+        //!
+        //! k -> 0 で通常の min に一致する。
+        //!
+        //! @param  [in] a 片方の値
+        //! @param  [in] b もう片方の値
+        //! @param  [in] k 丸める幅
+        //! @return 滑らかに繋いだ最小値
+        //--------------------------------------------------------------------
+        float SmoothMin(float a, float b, float k) {
+            if(k <= 0.0f) {
+                return std::min(a, b);
+            }
+
+            const float h = std::max(k - std::abs(a - b), 0.0f) / k;
+            return std::min(a, b) - h * h * k * 0.25f;
+        }
+
+        //--------------------------------------------------------------------
         //! 0 割りを避けつつ成分ごとの逆数を求めます。
         //! @param  [in] v 元のベクトル
         //! @return 成分ごとの逆数
@@ -55,6 +78,19 @@ namespace RockCore {
         , m_anisoScale(params.anisoScale)
         , m_invAnisoScale(SafeReciprocal(params.anisoScale)) {
 
+        //--------------------------------------------------------------------
+        // 破断面。これが無いと fBm の丸い塊にしかならない
+        //--------------------------------------------------------------------
+        CutPlaneSettings planeSettings{};
+        planeSettings.count    = params.planeCutCount;
+        planeSettings.depth    = params.planeCutDepth;
+        planeSettings.axisBias = params.planeAxisBias;
+        planeSettings.radius   = m_radius;
+
+        m_cutPlanes = BuildCutPlanes(planeSettings, params.seed);
+
+        m_edgeRounding = m_radius * std::max(params.edgeRounding, 0.0f);
+
         // 変位の最悪値で包む。各層のノイズは振幅の総和で正規化済みで
         // [-1,1] に収まるため、振幅の絶対値を足せば確実に上回る
         float amplitudeSum = 0.0f;
@@ -70,6 +106,41 @@ namespace RockCore {
     }
 
     //------------------------------------------------------------------------
+    //! ノイズ抜きの半径を求めます。
+    //------------------------------------------------------------------------
+    float RockField::BaseRadius(const Vec3& dir) const {
+        // まず外接球。カットされていない方向はここに当たって丸くなる
+        float radius = m_radius;
+
+        //--------------------------------------------------------------------
+        // 破断面を畳む。
+        //
+        // 半空間 dot(p, n) <= d の内側にいるレイが平面を抜ける距離は
+        // d / dot(dir, n)。dot が 0 へ近づくと発散するので、外接球の
+        // 数倍でクランプしてから smooth min へ渡す
+        //
+        // 畳む順は平面番号の昇順に固定する。smooth min は結合的でないので、
+        // 順序を変えると結果が変わって決定論が崩れる
+        //--------------------------------------------------------------------
+        constexpr float kFarFactor = 4.0f;
+        const float     farLimit   = m_radius * kFarFactor;
+
+        for(const CutPlane& plane : m_cutPlanes) {
+            const float facing = Dot(dir, plane.normal);
+            if(facing <= 1e-4f) {
+                // 平面の裏側へ向かうレイは、その平面には当たらない
+                continue;
+            }
+
+            const float hit = std::min(plane.distance / facing, farLimit);
+            radius          = SmoothMin(radius, hit, m_edgeRounding);
+        }
+
+        // 平面を重ねるほど smooth min の縮みが積もる。痩せすぎを止める
+        return std::max(radius, m_radius * 0.05f);
+    }
+
+    //------------------------------------------------------------------------
     //! 方向 dir の半径を求めます。
     //------------------------------------------------------------------------
     float RockField::Radius(const Vec3& dir) const {
@@ -79,7 +150,7 @@ namespace RockCore {
 
         // 半径が 0 へ潜り込むと星形でなくなる。振幅を 1 より大きくしたときだけ
         // 効く安全弁として下限で止める
-        return std::max(m_radius * (1.0f + displacement), m_radius * 0.05f);
+        return std::max(BaseRadius(dir) * (1.0f + displacement), m_radius * 0.05f);
     }
 
     //------------------------------------------------------------------------

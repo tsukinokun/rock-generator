@@ -60,6 +60,7 @@ namespace RockEditor {
         }
         SetLanguage(m_settings.language);
 
+
         auto previousTime = std::chrono::steady_clock::now();
 
         while(m_engine.GetWindow().ProcessMessages()) {
@@ -159,6 +160,22 @@ namespace RockEditor {
         m_pipeline.GetMutableParams() = m_editParams;
         m_pipeline.SetTargetStage(target);
 
+        //--------------------------------------------------------------------
+        // UV 展開を八面体射影へ落とす条件は2つ。
+        //
+        //   1. 操作中。xatlas は数百ms〜数秒かかるので、スライダを掴んでいる間に
+        //      走らせると形の更新がそこで待たされる
+        //   2. まだ一度も結果が出ていないとき。起動直後にいきなり xatlas を
+        //      走らせると、その間ずっと何も映らない。Debug ビルドでは数分に
+        //      なることもあり、固まったのと区別が付かない。
+        //      まず八面体射影で形を出し、空いてから焼き直す
+        //
+        // どちらも離せば（= 結果が出れば）選ばれた方式で焼き直される。
+        // ハッシュには「実際に使う方式」が入っているので、切り替わった瞬間に
+        // Unwrap が dirty になる
+        //--------------------------------------------------------------------
+        m_pipeline.SetFastPreview(m_editing || !m_snapshot.valid);
+
         if(m_pipeline.IsUpToDate()) {
             return;
         }
@@ -198,6 +215,7 @@ namespace RockEditor {
 
         // UI が読むのはこの写しだけ
         m_snapshot.mesh           = m_pipeline.GetMeshStats();
+        m_snapshot.unwrap         = m_pipeline.GetUnwrapStats();
         m_snapshot.normal         = m_pipeline.GetNormalBakeStats();
         m_snapshot.coveredTexels  = m_pipeline.GetBakeGBuffer().GetCoveredTexelCount();
         m_snapshot.textureSize    = m_pipeline.GetBakeGBuffer().GetSize();

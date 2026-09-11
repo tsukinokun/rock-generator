@@ -24,6 +24,7 @@
 #include <RockCore/Shape/RockField.hpp>
 #include <RockCore/Shape/RockMesher.hpp>
 #include <RockCore/Shape/RockParams.hpp>
+#include <RockCore/Unwrap/IUnwrapper.hpp>
 
 #include <RockCore/Types.hpp>
 
@@ -92,6 +93,21 @@ namespace RockCore {
         void SetTargetStage(PipelineStage stage) { m_targetStage = stage; }
 
         //------------------------------------------------------------------
+        //! 対話中かどうかを伝えます。
+        //!
+        //! true の間は UV 展開を八面体射影へ強制します。xatlas は数百ms〜
+        //! 数秒かかるので、スライダを掴んでいる間に走らせると形の更新が
+        //! そこで待たされて操作感が死ぬためです。
+        //!
+        //! これはパラメータではありませんが、ハッシュには「実際に使う方式」を
+        //! 混ぜてあります。そうしないとスライダを離したときに
+        //! 「Unwrap は完了済み」と判断されて xatlas が永遠に走りません。
+        //!
+        //! @param [in] fast 対話中なら true
+        //------------------------------------------------------------------
+        void SetFastPreview(bool fast) { m_fastPreview = fast; }
+
+        //------------------------------------------------------------------
         //! 差分のある段を順に実行します。
         //!
         //! 中断された段はハッシュを記録しないので、次の呼び出しでやり直します。
@@ -122,9 +138,20 @@ namespace RockCore {
             return m_status[static_cast<size_t>(stage)];
         }
 
-        //! メッシュを返します。
+        //! メッシュを返します。UV 展開とハードエッジ化まで済んだもの。
         //! @return メッシュ
         const MeshBuilder& GetMesh() const { return m_mesh; }
+
+        //------------------------------------------------------------------
+        //! UV 展開前のメッシュを返します。
+        //!
+        //! 破断面のクリップが位相を壊していないかを調べるのはこちら。
+        //! GetMesh() の方はシームとハードエッジで頂点が複製されているので、
+        //! 「頂点番号で多様体か」を見たいときは必ずこちらを使います。
+        //!
+        //! @return UV 展開前のメッシュ
+        //------------------------------------------------------------------
+        const MeshBuilder& GetBaseMesh() const { return m_baseMesh; }
 
         //! メッシュ生成の数値を返します。
         //! @return メッシュ生成の数値
@@ -137,6 +164,10 @@ namespace RockCore {
         //! Normal ベイクの数値を返します。
         //! @return Normal ベイクの数値
         const NormalBakeStats& GetNormalBakeStats() const { return m_normalStats; }
+
+        //! UV 展開の数値を返します。
+        //! @return UV 展開の数値
+        const UnwrapStats& GetUnwrapStats() const { return m_unwrapStats; }
 
         //! UV 空間のラスタライズ結果を返します。
         //! @return ラスタライズ結果
@@ -158,9 +189,23 @@ namespace RockCore {
         //! 各段が依存するパラメータのハッシュを計算し直します。
         void RecomputeHashes();
 
+        //! 実際に使う UV 展開の方式を返します。対話中は八面体射影へ落とします。
+        //! @return 展開方式
+        UnwrapMethod GetEffectiveUnwrapMethod() const;
+
+        //------------------------------------------------------------------
+        //! UV 展開とハードエッジ化を行います。
+        //!
+        //! @param  [in] cancel 中断フラグ。nullptr でもよい
+        //! @return 中断されずに終わったら true
+        //------------------------------------------------------------------
+        bool RunUnwrap(const CancelToken* cancel);
+
         RockParams m_params{};
 
         PipelineStage m_targetStage = PipelineStage::BakeNormal;
+
+        bool m_fastPreview = false;
 
         std::array<PipelineStageStatus, kPipelineStageCount> m_status{};
 
@@ -177,8 +222,20 @@ namespace RockCore {
         std::unique_ptr<RockField> m_lowField;
         std::unique_ptr<RockField> m_fullField;
 
+        //--------------------------------------------------------------------
+        //! Mesh 段の出力。UV も無く、法線も稜線で分割されていない素の形。
+        //!
+        //! これを別に持っているのは、Unwrap 段が必ず「展開前の状態」から
+        //! 始められるようにするため。展開もハードエッジ化も頂点を複製するので、
+        //! 同じメッシュへ二度かけると頂点が倍々に増えていく。
+        //! テクスチャサイズだけを変えたときは Mesh 段が走らないので、
+        //! 写しが無いと実際にそうなる
+        //--------------------------------------------------------------------
+        MeshBuilder m_baseMesh{};
+
         MeshBuilder   m_mesh{};
         RockMeshStats m_meshStats{};
+        UnwrapStats   m_unwrapStats{};
 
         BakeGBuffer     m_gbuffer{};
         ImageBuffer     m_normalMap{};

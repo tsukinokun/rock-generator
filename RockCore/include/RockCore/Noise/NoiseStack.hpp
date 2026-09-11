@@ -2,17 +2,20 @@
 //! @file   NoiseStack.hpp
 //! @brief  岩の表面を作る多層ノイズ
 //! @detail 層ごとに種類・振幅・周波数を持ち、合計を半径への変位として返します。
-//!         層の種類を後から増やしても Shape 側を触らずに済むよう、
-//!         インターフェースは Phase 1 の時点で確定させてあります。
 //!
 //!         層の役割:
-//!           L0 Fbm    塊感。Phase 1 から使う
-//!           L1 Worley 割れ・欠け。「岩に見える」最大の要因（Phase 3）
-//!           L2 Ridged 風化した稜線（Phase 3）
-//!           L3 高周波 粒・小穴。メッシュには載せず Normal だけへ（Phase 4）
+//!           Fbm    塊感。大きなうねり
+//!           Worley 割れ・欠け。「岩に見える」最大の要因
+//!           Ridged 風化した稜線
+//!
+//!         fBm だけでは凹凸が対称で C1 連続なので、どれだけ振幅を上げても
+//!         滑らかな塊にしかなりません。Worley の溝が入って初めて
+//!         「削れた跡のある石」に見えます。
 //----------------------------------------------------------------------------
 #pragma once
 #include <RockCore/Noise/Fbm.hpp>
+#include <RockCore/Noise/Ridged.hpp>
+#include <RockCore/Noise/Worley.hpp>
 
 #include <RockCore/Math/Vec.hpp>
 #include <RockCore/Types.hpp>
@@ -29,8 +32,8 @@ namespace RockCore {
     //------------------------------------------------------------------------
     enum class NoiseLayerKind : u8 {
         Fbm = 0,    //!< 塊感を作る fBm
-        Worley,     //!< Worley の F2-F1。割れ・欠け（Phase 3 で実装）
-        Ridged,     //!< Ridged multifractal。風化した稜線（Phase 3 で実装）
+        Worley,     //!< Worley の F2-F1。割れ・欠け
+        Ridged,     //!< Ridged multifractal。風化した稜線
     };
 
     //------------------------------------------------------------------------
@@ -40,8 +43,16 @@ namespace RockCore {
     struct NoiseLayerParams {
         bool           enabled   = true;
         NoiseLayerKind kind      = NoiseLayerKind::Fbm;
-        float          amplitude = 0.18f;    // 半径に対する変位の比率
-        FbmParams      fbm{};
+        float          amplitude = 0.18f;    //!< 半径に対する変位の比率
+
+        //! 種類ごとに意味が変わる補助パラメータ。
+        //!   Worley: 溝の幅（小さいほど細く鋭い割れ目）
+        //!   Ridged: 稜線の鋭さ（1 に近いほど尖る）
+        //!   Fbm   : 使わない
+        float sharpness = 0.5f;
+
+        //! 周波数・オクターブ数はどの種類でも共通で使う
+        FbmParams fbm{};
     };
 
     //------------------------------------------------------------------------
@@ -71,11 +82,15 @@ namespace RockCore {
     private:
         //------------------------------------------------------------------
         //! @struct Layer
-        //! 構築済みの1層
+        //! 構築済みの1層。種類ごとに使うメンバが違う
         //------------------------------------------------------------------
         struct Layer {
-            std::unique_ptr<Fbm> fbm;
-            float                amplitude = 0.0f;
+            NoiseLayerKind kind      = NoiseLayerKind::Fbm;
+            float          amplitude = 0.0f;
+
+            std::unique_ptr<Fbm>    fbm;
+            std::unique_ptr<Worley> worley;
+            std::unique_ptr<Ridged> ridged;
         };
 
         std::vector<Layer> m_layers;

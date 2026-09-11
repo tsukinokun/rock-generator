@@ -130,7 +130,13 @@ namespace RockCore {
     //------------------------------------------------------------------------
     //! メッシュへ UV を付けます。
     //------------------------------------------------------------------------
-    bool OctahedralUnwrapper::Unwrap(MeshBuilder& mesh, const UnwrapSettings& settings) {
+    bool OctahedralUnwrapper::Unwrap(MeshBuilder&          mesh,
+                                     const UnwrapSettings& settings,
+                                     const CancelToken*    cancel,
+                                     UnwrapStats*          outStats) {
+        // 中断を見る意味が無いほど速い。引数は口を揃えるためだけにある
+        (void)cancel;
+
         if(mesh.positions.empty() || mesh.indices.empty()) {
             return false;
         }
@@ -230,6 +236,16 @@ namespace RockCore {
         for(size_t i = 0; i < vertexCoords.size(); ++i) {
             mesh.uvs[i] = Vec2{(vertexCoords[i].x - boundsMin.x) * scale + margin,
                                (vertexCoords[i].y - boundsMin.y) * scale + margin};
+        }
+
+        if(outStats) {
+            outStats->methodName  = GetName();
+            outStats->vertexCount = mesh.GetVertexCount();
+
+            // チャートという概念が無いので 0 のまま。占有率も測らない
+            // （八面体射影は常にテクスチャ全面を使う）
+            outStats->chartCount  = 0;
+            outStats->utilization = 0.0f;
         }
 
         return true;

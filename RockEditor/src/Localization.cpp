@@ -50,7 +50,6 @@ namespace RockEditor {
             "Gain###gain",
             "Add layer###add_layer",
             "Remove layer###remove_layer",
-            "Worley / Ridged / plane cuts: Phase 3",
 
             // マテリアル / ベイクパネル
             "Base color###base_color",
@@ -111,6 +110,52 @@ namespace RockEditor {
             "Mesh",
             "Unwrap",
             "Bake: Normal",
+
+            //-- 破断面（Phase 3）
+            "Preset###preset",
+            "Apply a preset...",
+            "Weathered outcrop",
+            "Angular rock",
+            "Rounded boulder",
+            "Slab",
+
+            "Fracture",
+            "Cut planes###plane_count",
+            "Number of fracture planes. 0 degenerates to a smooth lump",
+            "Cut depth###plane_depth",
+            "Axis bias###plane_axis",
+            "Pulls the plane normals toward the vertical axis. Raise it for slabs",
+            "Edge rounding###edge_rounding",
+            "Weathering of the ridges. 0 is a fresh sharp break",
+            "Crease angle###crease_angle",
+            "Adjacent faces steeper than this become a hard edge",
+
+            "Kind###layer_kind",
+            "fBm",
+            "Worley (cracks)",
+            "Ridged",
+            "Sharpness###sharpness",
+            "Worley: groove width. Ridged: how sharp the ridges are",
+
+            "Cut planes    : %u",
+            "Split vertices: %u",
+
+            "UV unwrap",
+            "Method###unwrap_method",
+            "xatlas evens out texel density across the facets. Octahedral is "
+            "instant but loses resolution on faces pointing at the square corners",
+            "Octahedral (fast)",
+            "xatlas (even density)",
+            "Texel density###texels_per_unit",
+            "Texels per metre. 0 lets xatlas fit the charts to the texture, "
+            "which is almost always what you want for a single rock",
+            "Chart padding###uv_padding",
+            "Gap between charts in texels. Too small and dilation bleeds one chart into its neighbour",
+
+            "Unwrap        : %s",
+            "Charts        : %u",
+            "Atlas usage   : %.1f %%",
+            "xatlas could not fit a single atlas. Fell back to octahedral projection",
         };
 
         //--------------------------------------------------------------------
@@ -149,7 +194,6 @@ namespace RockEditor {
             "ゲイン###gain",
             "層を追加###add_layer",
             "層を削除###remove_layer",
-            "Worley / Ridged / 平面カット: Phase 3",
 
             // マテリアル / ベイクパネル
             "基本色###base_color",
@@ -210,6 +254,52 @@ namespace RockEditor {
             "メッシュ",
             "UV 展開",
             "ベイク: Normal",
+
+            //-- 破断面（Phase 3）
+            "プリセット###preset",
+            "プリセットを適用...",
+            "風化した露岩",
+            "角張った岩",
+            "丸い転石",
+            "板状の岩",
+
+            "破断面",
+            "破断面の枚数###plane_count",
+            "割れた面の数。0 にすると丸い塊へ退化する",
+            "食い込む深さ###plane_depth",
+            "軸バイアス###plane_axis",
+            "平面の法線を上下へ寄せる。板状の岩で上げる",
+            "稜線の丸め###edge_rounding",
+            "風化による角の落ち具合。0 で割れたての鋭い角",
+            "クリース角###crease_angle",
+            "これより折れている隣接面の境目をハードエッジにする",
+
+            "種類###layer_kind",
+            "fBm",
+            "Worley（割れ目）",
+            "Ridged",
+            "鋭さ###sharpness",
+            "Worley は溝の幅、Ridged は稜線の尖り具合",
+
+            "破断面      : %u",
+            "分割した頂点: %u",
+
+            "UV 展開",
+            "方式###unwrap_method",
+            "xatlas は破断面ごとのテクセル密度の差を無くす。八面体射影は一瞬で"
+            "終わるが、正方形の角を向いた面だけ解像度が落ちる",
+            "八面体射影（速い）",
+            "xatlas（密度が揃う）",
+            "テクセル密度###texels_per_unit",
+            "1 メートルあたりのテクセル数。0 なら xatlas がテクスチャに収まる"
+            "密度を見積もる。岩 1 個を 1 枚へ焼くならほぼ常にこれでよい",
+            "チャートの余白###uv_padding",
+            "チャート間の隙間（テクセル）。狭すぎると dilate が隣のチャートへ染み出す",
+
+            "展開        : %s",
+            "チャート数  : %u",
+            "アトラス占有: %.1f %%",
+            "xatlas がアトラス 1 枚に収められなかった。八面体射影へ落ちている",
         };
 
         constexpr size_t kTextCount = static_cast<size_t>(UiText::Count);

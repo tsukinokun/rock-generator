@@ -32,11 +32,21 @@ namespace RockCore {
     //------------------------------------------------------------------------
     class OctahedralUnwrapper final : public IUnwrapper {
     public:
+        //------------------------------------------------------------------
         //! メッシュへ UV を付けます。
+        //!
+        //! 1ms 未満で終わるので cancel は見ません（受け取るだけ）。
+        //!
         //! @param  [in,out] mesh     対象のメッシュ
         //! @param  [in]     settings 展開の設定
+        //! @param  [in]     cancel   中断フラグ。この展開器では使わない
+        //! @param  [out]    outStats 結果の数値。nullptr を渡してもよい
         //! @return 成功したら true
-        bool Unwrap(MeshBuilder& mesh, const UnwrapSettings& settings) override;
+        //------------------------------------------------------------------
+        bool Unwrap(MeshBuilder&          mesh,
+                    const UnwrapSettings& settings,
+                    const CancelToken*    cancel,
+                    UnwrapStats*          outStats) override;
 
         //! 表示用の名前を返します。
         //! @return 展開器の名前
