@@ -1,0 +1,16 @@
+# ビルド生成物
+.build/
+bin/
+bin-int/
+packages/
+Cache/
+.vs/
+*.user
+
+# 実行時ログ・調査用の一時ファイル
+# 一時ログは Logs/ 配下に出すこと（リポジトリ直下に吐かない）
+Logs/
+*.log
+
+# テストデータの生成物（Tools/make_test_*.py が作る）
+TestData/out/

@@ -1,0 +1,37 @@
+# ripgrep / Claude Code の Grep・Glob が走査しない場所。
+# .gitignore とは別物で、git の追跡は一切変えず「検索空間」だけを削る。
+# どうしても中を見たいときは rg --no-ignore、ファイル名の一覧は ls で取れる。
+
+# エンジンが抱える vendored 3rd party
+# （Effekseer / JoltPhysics / entt / cereal / hlslpp / DirectXTex）。
+# 19,000ファイル以上ある。
+External/TsukinoEngine/External/
+
+# 自動生成ドキュメントの機械可読版（外部ツール用）。
+# 人／エージェントが読むのは Docs/api-index.md と Docs/api/*.md。
+External/TsukinoEngine/Docs/agent-manifest.json
+
+# ImGui 本体。約10万行あり、こちらのコードを検索するときのノイズになる。
+# backends/ は自前のブートストラップと噛み合わせるので除外しない
+External/imgui/imgui.cpp
+External/imgui/imgui_demo.cpp
+External/imgui/imgui_draw.cpp
+External/imgui/imgui_tables.cpp
+External/imgui/imgui_widgets.cpp
+External/imgui/imgui_internal.h
+External/imgui/imstb_*.h
+External/imgui/docs/
+External/imgui/examples/
+External/imgui/misc/
+
+# xatlas 本体。単一ファイルで約1万行。使うのは公開ヘッダだけ
+External/xatlas/source/xatlas/xatlas.cpp
+External/xatlas/extra/
+External/xatlas/source/thekla/
+
+# 孤立した git worktree。丸ごとの複製チェックアウトで、
+# 既存の除外パターン（リポジトリ直下基準）が届かない。
+.claude/worktrees/
+
+# 実行時ログ。中身を見たいときは意図的に Read する。
+Logs/

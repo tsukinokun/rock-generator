@@ -1,3 +1,10 @@
 [submodule "External/TsukinoEngine"]
 	path = External/TsukinoEngine
 	url = https://github.com/tsukinokun/TsukinoEngine
+[submodule "External/imgui"]
+	path = External/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking
+[submodule "External/xatlas"]
+	path = External/xatlas
+	url = https://github.com/jpcy/xatlas.git
