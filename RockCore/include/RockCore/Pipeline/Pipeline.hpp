@@ -8,8 +8,8 @@
 //!                     ├→ [Mesh]       50-300ms
 //!                     ├→ [Unwrap]     0.5-3s
 //!                     ├→ [BakeNormal] 0.3-2s
-//!                     ├→ [BakeAo]     1-10s        （Phase 5）
-//!                     └→ [BakeColor]  50-200ms     （Phase 4）
+//!                     ├→ [BakeColor]  0.2-1s
+//!                     └→ [BakeAo]     1-10s        （Phase 5）
 //!
 //!         各段は「自分が依存するパラメータのハッシュ」を持ちます。上流の
 //!         ハッシュを自分のハッシュへ混ぜているので、無効化の伝播を
@@ -18,6 +18,7 @@
 #pragma once
 #include <RockCore/Bake/ImageBuffer.hpp>
 #include <RockCore/Bake/NormalBaker.hpp>
+#include <RockCore/Bake/SurfaceBaker.hpp>
 #include <RockCore/Bake/UvRasterizer.hpp>
 #include <RockCore/Mesh/MeshBuilder.hpp>
 #include <RockCore/Pipeline/CancelToken.hpp>
@@ -43,6 +44,7 @@ namespace RockCore {
         Mesh,          //!< 頂点と三角形
         Unwrap,        //!< UV 展開と UV 空間のラスタライズ
         BakeNormal,    //!< Normal マップ
+        BakeColor,     //!< Albedo と MetallicRoughness
         Count,
     };
 
@@ -165,6 +167,18 @@ namespace RockCore {
         //! @return Normal ベイクの数値
         const NormalBakeStats& GetNormalBakeStats() const { return m_normalStats; }
 
+        //! Albedo マップを返します。バイト列は sRGB で符号化されています。
+        //! @return Albedo マップ
+        const ImageBuffer& GetAlbedoMap() const { return m_albedoMap; }
+
+        //! MetallicRoughness マップを返します。G=ラフネス、B=メタリック。
+        //! @return MetallicRoughness マップ
+        const ImageBuffer& GetMetallicRoughnessMap() const { return m_metallicRoughnessMap; }
+
+        //! Albedo / MR ベイクの数値を返します。
+        //! @return ベイクの数値
+        const SurfaceBakeStats& GetSurfaceBakeStats() const { return m_surfaceStats; }
+
         //! UV 展開の数値を返します。
         //! @return UV 展開の数値
         const UnwrapStats& GetUnwrapStats() const { return m_unwrapStats; }
@@ -180,6 +194,10 @@ namespace RockCore {
         //! Normal マップが更新された回数を返します。SRV の作り直し判定に使います。
         //! @return 更新回数
         u32 GetNormalMapRevision() const { return m_normalMapRevision; }
+
+        //! Albedo / MR が更新された回数を返します。2枚は必ず同時に焼けるので1つで足ります。
+        //! @return 更新回数
+        u32 GetSurfaceMapRevision() const { return m_surfaceMapRevision; }
 
         //! 岩が収まる球の半径を返します。カメラ距離の基準に使います。
         //! @return 外接半径。まだ場が無ければ params の半径を返す
@@ -203,7 +221,7 @@ namespace RockCore {
 
         RockParams m_params{};
 
-        PipelineStage m_targetStage = PipelineStage::BakeNormal;
+        PipelineStage m_targetStage = PipelineStage::BakeColor;
 
         bool m_fastPreview = false;
 
@@ -241,8 +259,13 @@ namespace RockCore {
         ImageBuffer     m_normalMap{};
         NormalBakeStats m_normalStats{};
 
-        u32 m_meshRevision      = 0;
-        u32 m_normalMapRevision = 0;
+        ImageBuffer      m_albedoMap{};
+        ImageBuffer      m_metallicRoughnessMap{};
+        SurfaceBakeStats m_surfaceStats{};
+
+        u32 m_meshRevision       = 0;
+        u32 m_normalMapRevision  = 0;
+        u32 m_surfaceMapRevision = 0;
     };
 
 }    // namespace RockCore

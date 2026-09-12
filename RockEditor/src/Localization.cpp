@@ -156,6 +156,21 @@ namespace RockEditor {
             "Charts        : %u",
             "Atlas usage   : %.1f %%",
             "xatlas could not fit a single atlas. Fell back to octahedral projection",
+
+            "Second colour###second_color",
+            "The other colour of the mottling. Rock reads as clay when it is one flat colour",
+            "Mottling###color_variation",
+            "Mottle scale###color_frequency",
+            "Cells on the sphere are roughly 4*pi*f^2, so f=3 gives about 110 patches",
+            "Cavity dirt###cavity_dark",
+            "How much the pits and cracks darken. Soil and moss collect there, so real rock always does",
+            "Cavity roughness###cavity_rough",
+            "How much the pits and cracks roughen. Dirt kills the sheen",
+
+            "Cavity texels : %.1f %%",
+            "Luminance     : %.2f .. %.2f",
+
+            "Bake: Colour",
         };
 
         //--------------------------------------------------------------------
@@ -300,6 +315,21 @@ namespace RockEditor {
             "チャート数  : %u",
             "アトラス占有: %.1f %%",
             "xatlas がアトラス 1 枚に収められなかった。八面体射影へ落ちている",
+
+            "副色###second_color",
+            "斑のもう一方の色。単色だと形をどれだけ作り込んでも粘土に見える",
+            "斑の強さ###color_variation",
+            "斑の周波数###color_frequency",
+            "単位球上のセル数はおよそ 4*pi*f^2。f=3 で 110 個ほど",
+            "窪みの汚れ###cavity_dark",
+            "割れ目や窪みをどれだけ暗くするか。土や苔が溜まるので実物は必ず暗い",
+            "窪みのラフネス###cavity_rough",
+            "割れ目や窪みでどれだけ粗くするか。汚れが溜まると艶が消える",
+
+            "窪みテクセル: %.1f %%",
+            "明度        : %.2f .. %.2f",
+
+            "ベイク: 色",
         };
 
         constexpr size_t kTextCount = static_cast<size_t>(UiText::Count);
@@ -402,6 +432,7 @@ namespace RockEditor {
         case RockCore::PipelineStage::Mesh:       return Tr(UiText::StageMesh);
         case RockCore::PipelineStage::Unwrap:     return Tr(UiText::StageUnwrap);
         case RockCore::PipelineStage::BakeNormal: return Tr(UiText::StageBakeNormal);
+        case RockCore::PipelineStage::BakeColor:  return Tr(UiText::StageBakeColor);
         default:                                  return "?";
         }
     }

@@ -135,9 +135,12 @@ namespace RockEditor {
     }
 
     //------------------------------------------------------------------------
-    //! Normal マップを GPU へ載せ直します。
+    //! ベイク結果を GPU へ載せます。
     //------------------------------------------------------------------------
-    void PreviewScene::UploadNormalMap(ID3D11Device* device, const RockCore::ImageBuffer& image) {
+    void PreviewScene::UploadBakedTexture(ID3D11Device*                device,
+                                          const RockCore::ImageBuffer& image,
+                                          bool                         srgb,
+                                          BakedTexture&                target) {
         if(!device || !image.IsValid()) {
             return;
         }
@@ -154,54 +157,75 @@ namespace RockEditor {
         // 大きさが同じなら作り直さず、中身だけ差し替える。
         // ベイクし直すたびにテクスチャを作り直すとドライバ側の確保が積む
         //--------------------------------------------------------------------
-        if(!m_normalMapTexture || m_normalMapSize != size) {
+        if(!target.texture || target.size != size) {
             D3D11_TEXTURE2D_DESC desc{};
             desc.Width     = static_cast<UINT>(size);
             desc.Height    = static_cast<UINT>(image.GetHeight());
             desc.ArraySize = 1;
 
-            // ミップを持たせる。焼いた法線はテクセル1つぶんまで細かい成分を
+            // ミップを持たせる。焼いたマップはテクセル1つぶんまで細かい成分を
             // 含むので、ミップ無しだと岩を小さく映したときや斜めから見たときに
             // 激しくちらつく（エンジンの埋め込みテクスチャ経路も必ずミップを作る）
             desc.MipLevels = 0;    // 0 = フルチェーンを作らせる
 
-            // 【リニアのまま貼る】sRGB にすると法線が二重ガンマで壊れる。
+            //----------------------------------------------------------------
+            // sRGB にしてよいのは Albedo だけ。
+            //
+            // 法線は二重ガンマで壊れ、MR はラフネスの意味が変わる。
             // ディスクを経由しないのは、エンジンの単体テクスチャ経路が
             // WIC_FLAGS_FORCE_SRGB で無条件に sRGB 化してしまうため
-            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            //----------------------------------------------------------------
+            desc.Format = srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
 
             desc.SampleDesc.Count = 1;
             desc.Usage            = D3D11_USAGE_DEFAULT;
 
             // GenerateMips は下位ミップへ描き込むので RENDER_TARGET が要る
-            desc.BindFlags      = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-            desc.MiscFlags      = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
 
             Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
             if(FAILED(device->CreateTexture2D(&desc, nullptr, texture.GetAddressOf()))) {
-                Tsukino::Core::Log::Error("PreviewScene: failed to create the normal map texture.");
+                Tsukino::Core::Log::Error("PreviewScene: failed to create a baked texture.");
                 return;
             }
 
             Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
             if(FAILED(device->CreateShaderResourceView(texture.Get(), nullptr, srv.GetAddressOf()))) {
-                Tsukino::Core::Log::Error("PreviewScene: failed to create the normal map SRV.");
+                Tsukino::Core::Log::Error("PreviewScene: failed to create a baked texture SRV.");
                 return;
             }
 
-            m_normalMapTexture = texture;
-            m_normalMapSrv     = srv;
-            m_normalMapSize    = size;
+            target.texture = texture;
+            target.srv     = srv;
+            target.size    = size;
         }
 
         // 最上位ミップだけ書き込み、残りは GPU に作らせる
-        context->UpdateSubresource(m_normalMapTexture.Get(),
+        context->UpdateSubresource(target.texture.Get(),
                                    0,
                                    nullptr,
                                    image.GetPixels().data(),
                                    static_cast<UINT>(size) * 4u,
                                    0);
-        context->GenerateMips(m_normalMapSrv.Get());
+        context->GenerateMips(target.srv.Get());
+    }
+
+    //------------------------------------------------------------------------
+    //! Normal マップを GPU へ載せ直します。
+    //------------------------------------------------------------------------
+    void PreviewScene::UploadNormalMap(ID3D11Device* device, const RockCore::ImageBuffer& image) {
+        UploadBakedTexture(device, image, false, m_normalMap);
+    }
+
+    //------------------------------------------------------------------------
+    //! Albedo と MetallicRoughness を GPU へ載せ直します。
+    //------------------------------------------------------------------------
+    void PreviewScene::UploadSurfaceMaps(ID3D11Device*                device,
+                                         const RockCore::ImageBuffer& albedo,
+                                         const RockCore::ImageBuffer& metallicRoughness) {
+        UploadBakedTexture(device, albedo, true, m_albedoMap);
+        UploadBakedTexture(device, metallicRoughness, false, m_metallicRoughnessMap);
     }
 
     //------------------------------------------------------------------------
@@ -294,24 +318,36 @@ namespace RockEditor {
         ID3D11ShaderResourceView* white      = renderer.GetWhiteTextureSRV();
         ID3D11ShaderResourceView* flatNormal = renderer.GetFlatNormalTextureSRV();
 
-        const bool useBakedNormal = m_normalMapVisible && m_normalMapSrv;
+        const bool useBakedNormal  = m_bakedMapsVisible && m_normalMap.srv;
+        const bool useBakedSurface = m_bakedMapsVisible && m_albedoMap.srv && m_metallicRoughnessMap.srv;
 
         Tsukino::Renderer::Material& material = renderer.AllocMaterial();
         material.SetPipeline(m_pipeline.get());
         material.SetSampler(renderer.GetSampler(Tsukino::GraphicsCommon::SamplerType::AnisotropicWrap));
-        material.SetTexture(SRVSlot::Albedo, white);
-        material.SetTexture(SRVSlot::Normal, useBakedNormal ? m_normalMapSrv.Get() : flatNormal);
-        material.SetTexture(SRVSlot::MetallicRoughness, white);
+        material.SetTexture(SRVSlot::Albedo, useBakedSurface ? m_albedoMap.srv.Get() : white);
+        material.SetTexture(SRVSlot::Normal, useBakedNormal ? m_normalMap.srv.Get() : flatNormal);
+        material.SetTexture(SRVSlot::MetallicRoughness,
+                            useBakedSurface ? m_metallicRoughnessMap.srv.Get() : white);
         material.SetTexture(SRVSlot::Emissive, white);
         material.SetTexture(SRVSlot::AO, white);
 
-        // テクスチャ値は cbuffer 定数との乗算なので、MR を貼らない Phase 1 では
-        // ここの metallic / roughness がそのまま効く
+        //--------------------------------------------------------------------
+        // テクスチャ値は cbuffer 定数との乗算（GBuffer.ps.hlsl:95-108）。
+        //
+        // 焼いたマップを貼っている間は定数を 1 にして、マップの値を
+        // そのまま出す。掛け算なので、ここに params の色を残すと
+        // 二重に掛かって暗くなる。
+        //
+        // 逆に、まだ焼けていない間は白が来るので定数がそのまま効く。
+        // 形を動かしている最中のプレビューはこの経路
+        //--------------------------------------------------------------------
         Tsukino::Renderer::CBufferMaterial& materialData = renderer.AllocMaterialData();
-        materialData.baseColor  = hlslpp::float4(params.baseColor.x, params.baseColor.y, params.baseColor.z, 1.0f);
+        materialData.baseColor  = useBakedSurface
+                                      ? hlslpp::float4(1.0f, 1.0f, 1.0f, 1.0f)
+                                      : hlslpp::float4(params.baseColor.x, params.baseColor.y, params.baseColor.z, 1.0f);
         materialData.emissive   = hlslpp::float3(0.0f, 0.0f, 0.0f);
-        materialData.metallic   = params.metallic;
-        materialData.roughness  = params.roughness;
+        materialData.metallic   = useBakedSurface ? 1.0f : params.metallic;
+        materialData.roughness  = useBakedSurface ? 1.0f : params.roughness;
         materialData.specular   = 0.5f;
         materialData.rimColor   = hlslpp::float4(0.0f, 0.0f, 0.0f, 0.0f);
         materialData.rimParams  = hlslpp::float4(1.0f, 0.0f, 0.0f, 0.0f);

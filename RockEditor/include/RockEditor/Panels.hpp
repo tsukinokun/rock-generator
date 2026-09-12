@@ -32,6 +32,7 @@ namespace RockEditor {
         RockCore::RockMeshStats                                                  mesh{};
         RockCore::UnwrapStats                                                    unwrap{};
         RockCore::NormalBakeStats                                                normal{};
+        RockCore::SurfaceBakeStats                                               surface{};
         std::array<RockCore::PipelineStageStatus, RockCore::kPipelineStageCount> stages{};
 
         RockCore::u32 coveredTexels   = 0;

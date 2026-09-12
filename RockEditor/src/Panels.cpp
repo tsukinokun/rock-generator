@@ -312,10 +312,29 @@ namespace RockEditor {
             return;
         }
 
-        // 色とラフネスは下流のベイク段を無効化しない。
+        //--------------------------------------------------------------------
+        // 色とラフネスは Albedo / MR ベイクだけを無効化する。
         // ここを動かしても Unwrap と Normal ベイクは走らない
+        // （段ごとのハッシュが上流に Unwrap だけを混ぜているため）
+        //--------------------------------------------------------------------
         ImGui::ColorEdit3(Tr(UiText::LabelBaseColor), &params.baseColor.x);
+
+        ImGui::ColorEdit3(Tr(UiText::LabelSecondaryColor), &params.secondaryColor.x);
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipSecondaryColor));
+
+        ImGui::SliderFloat(Tr(UiText::LabelColorVariation), &params.colorVariation, 0.0f, 1.0f, "%.2f");
+
+        ImGui::SliderFloat(Tr(UiText::LabelColorNoiseFrequency), &params.colorNoiseFrequency, 0.2f, 12.0f, "%.2f");
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipColorNoiseFrequency));
+
+        ImGui::SliderFloat(Tr(UiText::LabelCavityDarkening), &params.cavityDarkening, 0.0f, 1.0f, "%.2f");
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipCavityDarkening));
+
         ImGui::SliderFloat(Tr(UiText::LabelRoughness), &params.roughness, 0.0f, 1.0f, "%.2f");
+
+        ImGui::SliderFloat(Tr(UiText::LabelCavityRoughness), &params.cavityRoughness, -0.5f, 0.5f, "%.2f");
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipCavityRoughness));
+
         DrawNote(Tr(UiText::NoteMetallicFixed));
 
         ImGui::Separator();
@@ -431,6 +450,13 @@ namespace RockEditor {
         ImGui::Text(Tr(UiText::FormatUvCoverage), coverage * 100.0f);
         ImGui::Text(Tr(UiText::FormatBakedTexels), snapshot.normal.texelsWritten);
         ImGui::Text(Tr(UiText::FormatDegenerateTbn), snapshot.normal.degenerateTexels);
+
+        //--------------------------------------------------------------------
+        // 窪みの割合。0 のままなら窪みの信号がどこにも効いていない。
+        // 「暗くしたつもりが真っ平ら」に気付けるようにここへ出す
+        //--------------------------------------------------------------------
+        ImGui::Text(Tr(UiText::FormatCavityRatio), snapshot.surface.cavityRatio * 100.0f);
+        ImGui::Text(Tr(UiText::FormatLuminanceRange), snapshot.surface.minLuminance, snapshot.surface.maxLuminance);
 
         ImGui::Separator();
 

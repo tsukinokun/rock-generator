@@ -92,7 +92,12 @@ namespace RockCore {
            cereal::make_nvp("dilatePasses", params.dilatePasses),
            cereal::make_nvp("bakeMaxFrequency", params.bakeMaxFrequency),
            cereal::make_nvp("baseColor", params.baseColor),
+           cereal::make_nvp("secondaryColor", params.secondaryColor),
+           cereal::make_nvp("colorVariation", params.colorVariation),
+           cereal::make_nvp("colorNoiseFrequency", params.colorNoiseFrequency),
+           cereal::make_nvp("cavityDarkening", params.cavityDarkening),
            cereal::make_nvp("roughness", params.roughness),
+           cereal::make_nvp("cavityRoughness", params.cavityRoughness),
            cereal::make_nvp("metallic", params.metallic),
            cereal::make_nvp("aoRayCount", params.aoRayCount),
            cereal::make_nvp("aoDistance", params.aoDistance));

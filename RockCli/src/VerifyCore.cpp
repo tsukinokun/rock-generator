@@ -17,10 +17,13 @@
 //!           5. xatlas。チャートが重なっていないか、アトラス 1 枚に収まったか、
 //!              展開後もハードエッジが残っているか、スレッドを起こしても
 //!              決定論が保たれるか
-//!           6. メッシュの健全性。閉じているか、退化が無いか、破断面が
+//!           6. Albedo / MR ベイク。窪みの信号が届いているか、窪みが
+//!              出っぱりより暗いか、メタリックが 0 のままか、
+//!              sRGB で符号化されているか
+//!           7. メッシュの健全性。閉じているか、退化が無いか、破断面が
 //!              実エッジとして乗っているか（半空間クリップの穴埋めの検証）
-//!           7. 4 プリセットが完走し、決定論を保つか
-//!           8. RockParams の JSON 往復
+//!           8. 4 プリセットが完走し、決定論を保つか
+//!           9. RockParams の JSON 往復
 //----------------------------------------------------------------------------
 #include <RockCore/Bake/Dilate.hpp>
 #include <RockCore/Bake/NormalBaker.hpp>
@@ -170,7 +173,7 @@ namespace {
 
         auto run = [&](Pipeline& pipeline) {
             pipeline.GetMutableParams() = params;
-            pipeline.SetTargetStage(PipelineStage::BakeNormal);
+            pipeline.SetTargetStage(PipelineStage::BakeColor);
             return pipeline.Update(nullptr, nullptr);
         };
 
@@ -182,6 +185,9 @@ namespace {
         Check(a.GetMesh().positions.size() == b.GetMesh().positions.size(), "vertex count matches");
         Check(a.GetMesh().indices == b.GetMesh().indices, "index buffer matches");
         Check(a.GetNormalMap().GetPixels() == b.GetNormalMap().GetPixels(), "normal map is bit identical");
+        Check(a.GetAlbedoMap().GetPixels() == b.GetAlbedoMap().GetPixels(), "albedo map is bit identical");
+        Check(a.GetMetallicRoughnessMap().GetPixels() == b.GetMetallicRoughnessMap().GetPixels(),
+              "metallic-roughness map is bit identical");
 
         std::printf("       vertices=%u triangles=%u covered texels=%u\n",
                     a.GetMesh().GetVertexCount(),
@@ -193,14 +199,20 @@ namespace {
         Pipeline pipeline;
         pipeline.GetMutableParams().textureSize      = 128;
         pipeline.GetMutableParams().targetEdgeLength = 0.09f;
-        pipeline.SetTargetStage(PipelineStage::BakeNormal);
+        pipeline.SetTargetStage(PipelineStage::BakeColor);
         pipeline.Update(nullptr, nullptr);
 
         const u32 unwrapRuns = pipeline.GetStageStatus(PipelineStage::Unwrap).runCount;
         const u32 bakeRuns   = pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount;
+        const u32 colorRuns  = pipeline.GetStageStatus(PipelineStage::BakeColor).runCount;
         const u32 meshRuns   = pipeline.GetStageStatus(PipelineStage::Mesh).runCount;
 
-        // 色とラフネスだけを動かす。どの段も走ってはいけない
+        //--------------------------------------------------------------------
+        // 色とラフネスだけを動かす。
+        //
+        // Albedo / MR は焼き直すが、そこより上は 1 段も走ってはいけない。
+        // これが段ごとのハッシュが効いている証拠で、体感速度をほぼ決める
+        //--------------------------------------------------------------------
         pipeline.GetMutableParams().baseColor = Vec3{0.9f, 0.1f, 0.1f};
         pipeline.GetMutableParams().roughness = 0.2f;
         pipeline.Update(nullptr, nullptr);
@@ -208,6 +220,7 @@ namespace {
         Check(pipeline.GetStageStatus(PipelineStage::Unwrap).runCount == unwrapRuns, "color change does not re-run Unwrap");
         Check(pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount == bakeRuns, "color change does not re-run Bake:Normal");
         Check(pipeline.GetStageStatus(PipelineStage::Mesh).runCount == meshRuns, "color change does not re-run Mesh");
+        Check(pipeline.GetStageStatus(PipelineStage::BakeColor).runCount == colorRuns + 1, "color change re-runs Bake:Color");
 
         // 形を動かすと全段走る
         pipeline.GetMutableParams().noiseLayers[0].amplitude = 0.3f;
@@ -216,6 +229,7 @@ namespace {
         Check(pipeline.GetStageStatus(PipelineStage::Mesh).runCount == meshRuns + 1, "shape change re-runs Mesh");
         Check(pipeline.GetStageStatus(PipelineStage::Unwrap).runCount == unwrapRuns + 1, "shape change re-runs Unwrap");
         Check(pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount == bakeRuns + 1, "shape change re-runs Bake:Normal");
+        Check(pipeline.GetStageStatus(PipelineStage::BakeColor).runCount == colorRuns + 2, "shape change re-runs Bake:Color");
     }
 
     void TestUnwrapCoverage() {
@@ -458,8 +472,8 @@ namespace {
             b.GetMutableParams()             = MakeRockPreset(preset, 4242u);
             a.GetMutableParams().textureSize = 128;
             b.GetMutableParams().textureSize = 128;
-            a.SetTargetStage(PipelineStage::BakeNormal);
-            b.SetTargetStage(PipelineStage::BakeNormal);
+            a.SetTargetStage(PipelineStage::BakeColor);
+            b.SetTargetStage(PipelineStage::BakeColor);
 
             const bool okA = a.Update(nullptr, nullptr);
             const bool okB = b.Update(nullptr, nullptr);
@@ -767,6 +781,184 @@ namespace {
               "xatlas is deterministic");
     }
 
+    //------------------------------------------------------------------------
+    //! リニアの値を sRGB のバイトへ符号化します（SurfaceBaker.cpp の参照実装）。
+    //! @param  [in] value リニアの値
+    //! @return sRGB のバイト
+    //------------------------------------------------------------------------
+    u8 EncodeSrgbReference(float value) {
+        const float clamped = std::clamp(value, 0.0f, 1.0f);
+
+        const float encoded =
+            (clamped <= 0.0031308f) ? (clamped * 12.92f) : (1.055f * std::pow(clamped, 1.0f / 2.4f) - 0.055f);
+
+        return static_cast<u8>(std::lround(std::clamp(encoded, 0.0f, 1.0f) * 255.0f));
+    }
+
+    void TestSurfaceBake() {
+        constexpr int kTextureSize = 256;
+
+        Pipeline pipeline;
+        pipeline.GetMutableParams().textureSize      = kTextureSize;
+        pipeline.GetMutableParams().targetEdgeLength = 0.05f;
+        pipeline.SetTargetStage(PipelineStage::BakeColor);
+
+        Check(pipeline.Update(nullptr, nullptr), "the color bake completes");
+
+        const SurfaceBakeStats& stats  = pipeline.GetSurfaceBakeStats();
+        const BakeGBuffer&      buffer = pipeline.GetBakeGBuffer();
+
+        const std::vector<u8>& albedo = pipeline.GetAlbedoMap().GetPixels();
+        const std::vector<u8>& mr     = pipeline.GetMetallicRoughnessMap().GetPixels();
+
+        std::printf("       texels=%u cavity=%.1f%% luminance=%.3f..%.3f\n",
+                    stats.texelsWritten,
+                    stats.cavityRatio * 100.0f,
+                    stats.minLuminance,
+                    stats.maxLuminance);
+        // SurfaceBaker の kReliefToCavity はこの値の逆数に取ってある。
+        // ノイズ層の構成を変えたらここを見て取り直すこと
+        std::printf("       max relief = %.4f\n", stats.maxRelief);
+
+        Check(stats.texelsWritten > 0, "the color bake wrote texels");
+        Check(albedo.size() == mr.size() && !albedo.empty(), "both maps have the same size");
+
+        //--------------------------------------------------------------------
+        // 窪みの信号が効いているか。
+        //
+        // ここが 0 なら、色は焼けていても割れ目と出っぱりが区別されていない。
+        // 「暗くしたつもりが真っ平ら」という失敗はこれでしか気付けない
+        //--------------------------------------------------------------------
+        Check(stats.cavityRatio > 0.001f, "the cavity signal reaches the surface");
+        Check(stats.maxLuminance > stats.minLuminance + 0.01f, "the albedo is not one flat colour");
+
+        //--------------------------------------------------------------------
+        // MetallicRoughness のチャンネル割り当て（glTF 慣例）。
+        //
+        // B に 0 以外が入ると岩が金属になる。見た目では「妙にてかる」
+        // としか分からず原因に辿り着けないので、ここで数える
+        //--------------------------------------------------------------------
+        u32 metallicTexels = 0;
+        u32 minRoughness   = 255u;
+        u32 maxRoughness   = 0u;
+
+        // 窪み（＝ラフネスが高い側）と出っぱりで明度を比べるための集計
+        double darkSum   = 0.0;
+        double brightSum = 0.0;
+        u32    darkCount = 0;
+        u32    brightCount = 0;
+
+        std::vector<u8> roughnessValues;
+        roughnessValues.reserve(static_cast<size_t>(stats.texelsWritten));
+
+        for(int y = 0; y < kTextureSize; ++y) {
+            for(int x = 0; x < kTextureSize; ++x) {
+                if(!buffer.IsCovered(x, y)) {
+                    continue;
+                }
+
+                const size_t index = (static_cast<size_t>(y) * static_cast<size_t>(kTextureSize) +
+                                      static_cast<size_t>(x)) * 4u;
+
+                if(mr[index + 2] != 0u) {
+                    ++metallicTexels;
+                }
+
+                const u8 roughness = mr[index + 1];
+
+                minRoughness = std::min(minRoughness, static_cast<u32>(roughness));
+                maxRoughness = std::max(maxRoughness, static_cast<u32>(roughness));
+                roughnessValues.push_back(roughness);
+            }
+        }
+
+        std::printf("       roughness byte range = %u..%u\n", minRoughness, maxRoughness);
+
+        Check(metallicTexels == 0, "metallic stays 0 everywhere (rock is never metal)");
+        Check(maxRoughness > minRoughness, "roughness varies with the cavity signal");
+
+        //--------------------------------------------------------------------
+        // 窪みが実際に暗いか。
+        //
+        // ラフネスは「基準 + 窪み * 係数」なので、ラフネスの高い側が窪み。
+        // その側の明度が低くなければ、2 枚のマップが別々の信号を見ている
+        //--------------------------------------------------------------------
+        if(!roughnessValues.empty() && maxRoughness > minRoughness) {
+            std::vector<u8> sorted = roughnessValues;
+            std::sort(sorted.begin(), sorted.end());
+
+            const u8 lowCut  = sorted[sorted.size() / 10];
+            const u8 highCut = sorted[(sorted.size() * 9) / 10];
+
+            for(int y = 0; y < kTextureSize; ++y) {
+                for(int x = 0; x < kTextureSize; ++x) {
+                    if(!buffer.IsCovered(x, y)) {
+                        continue;
+                    }
+
+                    const size_t index = (static_cast<size_t>(y) * static_cast<size_t>(kTextureSize) +
+                                          static_cast<size_t>(x)) * 4u;
+
+                    // sRGB のまま足して構わない。ここで見たいのは大小関係だけ
+                    const double luminance = albedo[index] * 0.2126 + albedo[index + 1] * 0.7152 +
+                                             albedo[index + 2] * 0.0722;
+
+                    if(mr[index + 1] >= highCut) {
+                        darkSum += luminance;
+                        ++darkCount;
+                    } else if(mr[index + 1] <= lowCut) {
+                        brightSum += luminance;
+                        ++brightCount;
+                    }
+                }
+            }
+        }
+
+        if(darkCount > 0 && brightCount > 0) {
+            const double darkMean   = darkSum / static_cast<double>(darkCount);
+            const double brightMean = brightSum / static_cast<double>(brightCount);
+
+            std::printf("       mean albedo: cavity=%.1f  raised=%.1f\n", darkMean, brightMean);
+            Check(darkMean < brightMean, "cavities are darker than the raised parts");
+        } else {
+            Check(false, "could not split texels into cavity and raised");
+        }
+
+        //--------------------------------------------------------------------
+        // sRGB 符号化。
+        //
+        // 斑と汚れを切れば、全テクセルが基本色そのものになるはず。
+        // ここがずれていたら、リニアのまま 8bit へ詰めているか、
+        // 二重にガンマを掛けている
+        //--------------------------------------------------------------------
+        Pipeline flat;
+        flat.GetMutableParams().textureSize      = 64;
+        flat.GetMutableParams().targetEdgeLength = 0.09f;
+        flat.GetMutableParams().colorVariation   = 0.0f;
+        flat.GetMutableParams().cavityDarkening  = 0.0f;
+        flat.SetTargetStage(PipelineStage::BakeColor);
+        flat.Update(nullptr, nullptr);
+
+        const Vec3 expectedColor = flat.GetParams().baseColor;
+
+        const u8 expected[3] = {EncodeSrgbReference(expectedColor.x),
+                                EncodeSrgbReference(expectedColor.y),
+                                EncodeSrgbReference(expectedColor.z)};
+
+        const std::vector<u8>& flatPixels = flat.GetAlbedoMap().GetPixels();
+
+        bool srgbMatches = !flatPixels.empty();
+        for(size_t i = 0; i + 2 < flatPixels.size(); i += 4) {
+            if(flatPixels[i] != expected[0] || flatPixels[i + 1] != expected[1] || flatPixels[i + 2] != expected[2]) {
+                srgbMatches = false;
+                break;
+            }
+        }
+
+        std::printf("       flat albedo expected (%u,%u,%u)\n", expected[0], expected[1], expected[2]);
+        Check(srgbMatches, "a flat colour bakes to the sRGB encoding of the base colour");
+    }
+
     void TestJsonRoundTrip() {
         RockParams original{};
         original.seed                       = 987654321u;
@@ -811,6 +1003,8 @@ int RunCoreVerification() {
     TestUnwrapCoverage();
     std::printf("--- xatlas ---\n");
     TestXAtlasUnwrap();
+    std::printf("--- Surface (Albedo / MR) ---\n");
+    TestSurfaceBake();
     std::printf("--- Mesh integrity ---\n");
     TestMeshIntegrity();
     std::printf("--- Presets ---\n");

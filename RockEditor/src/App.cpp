@@ -149,13 +149,13 @@ namespace RockEditor {
             return;
         }
 
-        // 操作中は Unwrap まで。UV が無いとベイク済みの法線を貼る座標が
+        // 操作中は Unwrap まで。UV が無いとベイク済みのマップを貼る座標が
         // 取れないので、Mesh で止めずに Unwrap までは進めておく
         const RockCore::PipelineStage target =
-            m_editing ? RockCore::PipelineStage::Unwrap : RockCore::PipelineStage::BakeNormal;
+            m_editing ? RockCore::PipelineStage::Unwrap : RockCore::PipelineStage::BakeColor;
 
-        // 形を動かしている最中は、前の形で焼いた法線を貼らない
-        m_preview.SetNormalMapVisible(!m_editing);
+        // 形を動かしている最中は、前の形で焼いたマップを貼らない
+        m_preview.SetBakedMapsVisible(!m_editing);
 
         m_pipeline.GetMutableParams() = m_editParams;
         m_pipeline.SetTargetStage(target);
@@ -211,12 +211,18 @@ namespace RockEditor {
             m_uploadedNormalRevision = m_pipeline.GetNormalMapRevision();
         }
 
+        if(m_pipeline.GetSurfaceMapRevision() != m_uploadedSurfaceRevision) {
+            m_preview.UploadSurfaceMaps(device, m_pipeline.GetAlbedoMap(), m_pipeline.GetMetallicRoughnessMap());
+            m_uploadedSurfaceRevision = m_pipeline.GetSurfaceMapRevision();
+        }
+
         m_boundingRadius = m_pipeline.GetBoundingRadius();
 
         // UI が読むのはこの写しだけ
         m_snapshot.mesh           = m_pipeline.GetMeshStats();
         m_snapshot.unwrap         = m_pipeline.GetUnwrapStats();
         m_snapshot.normal         = m_pipeline.GetNormalBakeStats();
+        m_snapshot.surface        = m_pipeline.GetSurfaceBakeStats();
         m_snapshot.coveredTexels  = m_pipeline.GetBakeGBuffer().GetCoveredTexelCount();
         m_snapshot.textureSize    = m_pipeline.GetBakeGBuffer().GetSize();
         m_snapshot.boundingRadius = m_boundingRadius;

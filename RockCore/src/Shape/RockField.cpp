@@ -161,6 +161,54 @@ namespace RockCore {
     }
 
     //------------------------------------------------------------------------
+    //! 周囲と比べてどれだけ窪んでいるかを返します。
+    //------------------------------------------------------------------------
+    float RockField::Relief(const Vec3& dir, float angularRadius) const {
+        const float radius = Radius(dir);
+        if(radius <= 0.0f || angularRadius <= 0.0f) {
+            return 0.0f;
+        }
+
+        //--------------------------------------------------------------------
+        // dir に直交する基底を作る。
+        //
+        // 成分の絶対値が最小の軸を選んでから外積を取る。dir に近い軸を選ぶと
+        // 外積が 0 に潰れて基底が作れない
+        //--------------------------------------------------------------------
+        const float absX = std::abs(dir.x);
+        const float absY = std::abs(dir.y);
+        const float absZ = std::abs(dir.z);
+
+        Vec3 axis{0.0f, 0.0f, 1.0f};
+        if(absX <= absY && absX <= absZ) {
+            axis = Vec3{1.0f, 0.0f, 0.0f};
+        } else if(absY <= absZ) {
+            axis = Vec3{0.0f, 1.0f, 0.0f};
+        }
+
+        const Vec3 tangent  = Normalize(Cross(dir, axis));
+        const Vec3 binormal = Cross(dir, tangent);
+
+        //--------------------------------------------------------------------
+        // 周囲を 4 方位で測る。
+        //
+        // 8 方位にしても値はほとんど変わらないのに評価回数が倍になる。
+        // ここは 1 テクセルにつき毎回走るので、4 で足りるなら 4 にする
+        //--------------------------------------------------------------------
+        const float offset = std::tan(std::min(angularRadius, 1.0f));
+
+        float sum = 0.0f;
+        for(int i = 0; i < 4; ++i) {
+            const float angle = static_cast<float>(i) * 1.5707963f;
+
+            const Vec3 around = tangent * (std::cos(angle) * offset) + binormal * (std::sin(angle) * offset);
+            sum += Radius(Normalize(dir + around));
+        }
+
+        return (sum * 0.25f - radius) / radius;
+    }
+
+    //------------------------------------------------------------------------
     //! 任意の位置から、その点が属する方向を求めます。
     //------------------------------------------------------------------------
     Vec3 RockField::DirectionOf(const Vec3& p) const {

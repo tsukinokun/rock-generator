@@ -92,6 +92,24 @@ namespace RockEditor {
         void UploadNormalMap(ID3D11Device* device, const RockCore::ImageBuffer& image);
 
         //------------------------------------------------------------------
+        //! Albedo と MetallicRoughness を GPU へ載せ直します。
+        //!
+        //! **Albedo だけ sRGB の SRV で作ります。** ベイク側が sRGB で
+        //! 符号化して書いているので、ここをリニアにすると色が持ち上がって
+        //! 白っぽくなります。MR はリニアのままです（ラフネスに
+        //! ガンマを掛けたら意味が変わる）。
+        //!
+        //! 2 枚は必ず同時に焼けるので、載せるのも 1 回で受けます。
+        //!
+        //! @param [in] device             デバイス
+        //! @param [in] albedo             Albedo（sRGB 符号化済み）
+        //! @param [in] metallicRoughness  MetallicRoughness（リニア）
+        //------------------------------------------------------------------
+        void UploadSurfaceMaps(ID3D11Device*                device,
+                               const RockCore::ImageBuffer& albedo,
+                               const RockCore::ImageBuffer& metallicRoughness);
+
+        //------------------------------------------------------------------
         //! カメラとライトをレンダラへ設定します。
         //!
         //! 呼ぶ順序に意味があります。SetDirectionalLight は
@@ -121,26 +139,48 @@ namespace RockEditor {
         bool HasMesh() const { return m_meshBuffer.indexCount > 0; }
 
         //------------------------------------------------------------------
-        //! Normal マップを貼るかを切り替えます。
+        //! 焼いたマップを貼るかを切り替えます。
         //!
-        //! 形を動かしている最中は、前の形で焼いた Normal マップが残っていて
-        //! 実際の凹凸と噛み合いません。そのまま貼ると砂嵐のように見えて
-        //! Phase 2 の目視検証の邪魔になるので、その間は平坦な法線へ落とします。
+        //! 形を動かしている最中は、前の形で焼いたマップが残っていて実際の
+        //! 凹凸と噛み合いません。そのまま貼ると法線が砂嵐のように見え、
+        //! 窪みの汚れも見当違いの場所に出ます。その間は平坦な法線と
+        //! cbuffer の単色へ落とします。
         //!
         //! @param [in] visible 貼るなら true
         //------------------------------------------------------------------
-        void SetNormalMapVisible(bool visible) { m_normalMapVisible = visible; }
+        void SetBakedMapsVisible(bool visible) { m_bakedMapsVisible = visible; }
 
     private:
+        //------------------------------------------------------------------
+        //! @struct BakedTexture
+        //! ベイク結果1枚ぶんの GPU 資源
+        //------------------------------------------------------------------
+        struct BakedTexture {
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+            Microsoft::WRL::ComPtr<ID3D11Texture2D>          texture;
+            int                                              size = 0;
+        };
+
+        //------------------------------------------------------------------
+        //! ベイク結果を GPU へ載せます。
+        //!
+        //! @param [in]     device デバイス
+        //! @param [in]     image  載せる画像
+        //! @param [in]     srgb   sRGB の SRV で作るなら true
+        //! @param [in,out] target 載せ先
+        //------------------------------------------------------------------
+        void UploadBakedTexture(ID3D11Device* device, const RockCore::ImageBuffer& image, bool srgb, BakedTexture& target);
+
         //! GBuffer パス用のパイプライン。メッシュが変わっても作り直さない
         std::shared_ptr<Tsukino::Renderer::PipelineState> m_pipeline;
 
         Tsukino::Renderer::MeshBuffer m_meshBuffer{};
 
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_normalMapSrv;
-        Microsoft::WRL::ComPtr<ID3D11Texture2D>          m_normalMapTexture;
-        int                                              m_normalMapSize    = 0;
-        bool                                             m_normalMapVisible = true;
+        BakedTexture m_normalMap{};
+        BakedTexture m_albedoMap{};
+        BakedTexture m_metallicRoughnessMap{};
+
+        bool m_bakedMapsVisible = true;
     };
 
 }    // namespace RockEditor

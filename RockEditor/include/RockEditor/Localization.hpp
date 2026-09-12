@@ -189,6 +189,22 @@ namespace RockEditor {
         FormatAtlasUtilization,
         NoteUnwrapFellBack,
 
+        //-- マテリアル ------------------------------------------------------
+        LabelSecondaryColor,
+        TipSecondaryColor,
+        LabelColorVariation,
+        LabelColorNoiseFrequency,
+        TipColorNoiseFrequency,
+        LabelCavityDarkening,
+        TipCavityDarkening,
+        LabelCavityRoughness,
+        TipCavityRoughness,
+
+        FormatCavityRatio,
+        FormatLuminanceRange,
+
+        StageBakeColor,
+
         Count,
     };
 

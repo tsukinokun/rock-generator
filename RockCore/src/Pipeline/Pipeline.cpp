@@ -103,6 +103,7 @@ namespace RockCore {
         case PipelineStage::Mesh:       return "Mesh";
         case PipelineStage::Unwrap:     return "Unwrap";
         case PipelineStage::BakeNormal: return "Bake: Normal";
+        case PipelineStage::BakeColor:  return "Bake: Color";
         default:                        return "?";
         }
     }
@@ -216,6 +217,31 @@ namespace RockCore {
         normalHasher.Mix(m_currentHash[static_cast<size_t>(PipelineStage::Unwrap)]);
         normalHasher.Mix(m_params.dilatePasses);
         m_currentHash[static_cast<size_t>(PipelineStage::BakeNormal)] = normalHasher.Get();
+
+        //--------------------------------------------------------------------
+        // BakeColor: 上流 + マテリアル。
+        //
+        // 上流に混ぜるのは **Unwrap** であって BakeNormal ではない。
+        // この 2 つは兄弟で、どちらも UV にしか依存しない。段の並びは
+        // 実行順なので BakeNormal が先に来るが、依存関係ではない。
+        // ここへ BakeNormal を混ぜると、色を変えただけで Normal の
+        // ハッシュ経由の連鎖が起きて意味のない再実行が増える
+        //--------------------------------------------------------------------
+        Hasher colorHasher;
+        colorHasher.Mix(m_currentHash[static_cast<size_t>(PipelineStage::Unwrap)]);
+        colorHasher.Mix(m_params.baseColor);
+        colorHasher.Mix(m_params.secondaryColor);
+        colorHasher.Mix(m_params.colorVariation);
+        colorHasher.Mix(m_params.colorNoiseFrequency);
+        colorHasher.Mix(m_params.cavityDarkening);
+        colorHasher.Mix(m_params.roughness);
+        colorHasher.Mix(m_params.cavityRoughness);
+        colorHasher.Mix(m_params.metallic);
+
+        // 窪みの信号は半径関数から取るので、形が変われば色も焼き直す。
+        // seed は Field のハッシュ経由で Unwrap まで伝わっている
+        colorHasher.Mix(m_params.dilatePasses);
+        m_currentHash[static_cast<size_t>(PipelineStage::BakeColor)] = colorHasher.Get();
 
         //--------------------------------------------------------------------
         // dirty 判定。上流のハッシュを自分へ混ぜてあるので、
@@ -398,6 +424,34 @@ namespace RockCore {
             ++m_normalMapRevision;
 
             markCompleted(PipelineStage::BakeNormal, ElapsedMilliseconds(begin));
+        }
+
+        //--------------------------------------------------------------------
+        // BakeColor
+        //--------------------------------------------------------------------
+        if(shouldRun(PipelineStage::BakeColor)) {
+            if(!m_fullField) {
+                return false;
+            }
+            const auto begin = Now();
+
+            if(!BakeSurfaceMaps(m_gbuffer,
+                                *m_fullField,
+                                m_params,
+                                m_albedoMap,
+                                m_metallicRoughnessMap,
+                                progress,
+                                cancel,
+                                &m_surfaceStats)) {
+                // 中断された。ハッシュを記録しないので次回やり直す
+                return false;
+            }
+
+            DilateImage(m_albedoMap, m_gbuffer.GetCoverage(), m_params.dilatePasses);
+            DilateImage(m_metallicRoughnessMap, m_gbuffer.GetCoverage(), m_params.dilatePasses);
+            ++m_surfaceMapRevision;
+
+            markCompleted(PipelineStage::BakeColor, ElapsedMilliseconds(begin));
         }
 
         return true;
