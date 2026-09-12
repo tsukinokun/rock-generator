@@ -205,6 +205,20 @@ namespace RockEditor {
 
         StageBakeColor,
 
+        //-- AO --------------------------------------------------------------
+        HeadingAo,
+        LabelAoRayCount,
+        TipAoRayCount,
+        LabelAoDistance,
+        TipAoDistance,
+        LabelAoDivisor,
+        TipAoDivisor,
+
+        FormatAoMean,
+        FormatAoMin,
+
+        StageBakeAo,
+
         Count,
     };
 

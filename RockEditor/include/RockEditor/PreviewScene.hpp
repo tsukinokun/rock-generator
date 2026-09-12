@@ -110,6 +110,13 @@ namespace RockEditor {
                                const RockCore::ImageBuffer& metallicRoughness);
 
         //------------------------------------------------------------------
+        //! AO を GPU へ載せ直します。リニアのままです。
+        //! @param [in] device デバイス
+        //! @param [in] image  載せる画像
+        //------------------------------------------------------------------
+        void UploadAoMap(ID3D11Device* device, const RockCore::ImageBuffer& image);
+
+        //------------------------------------------------------------------
         //! カメラとライトをレンダラへ設定します。
         //!
         //! 呼ぶ順序に意味があります。SetDirectionalLight は
@@ -179,6 +186,7 @@ namespace RockEditor {
         BakedTexture m_normalMap{};
         BakedTexture m_albedoMap{};
         BakedTexture m_metallicRoughnessMap{};
+        BakedTexture m_aoMap{};
 
         bool m_bakedMapsVisible = true;
     };

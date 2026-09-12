@@ -100,7 +100,8 @@ namespace RockCore {
            cereal::make_nvp("cavityRoughness", params.cavityRoughness),
            cereal::make_nvp("metallic", params.metallic),
            cereal::make_nvp("aoRayCount", params.aoRayCount),
-           cereal::make_nvp("aoDistance", params.aoDistance));
+           cereal::make_nvp("aoDistance", params.aoDistance),
+           cereal::make_nvp("aoTextureDivisor", params.aoTextureDivisor));
     }
 
     //------------------------------------------------------------------------

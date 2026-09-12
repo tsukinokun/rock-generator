@@ -9,6 +9,7 @@
 #include <RockCore/Unwrap/OctahedralUnwrapper.hpp>
 #include <RockCore/Unwrap/XAtlasUnwrapper.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <type_traits>
 
@@ -104,6 +105,7 @@ namespace RockCore {
         case PipelineStage::Unwrap:     return "Unwrap";
         case PipelineStage::BakeNormal: return "Bake: Normal";
         case PipelineStage::BakeColor:  return "Bake: Color";
+        case PipelineStage::BakeAo:     return "Bake: AO";
         default:                        return "?";
         }
     }
@@ -242,6 +244,21 @@ namespace RockCore {
         // seed は Field のハッシュ経由で Unwrap まで伝わっている
         colorHasher.Mix(m_params.dilatePasses);
         m_currentHash[static_cast<size_t>(PipelineStage::BakeColor)] = colorHasher.Get();
+
+        //--------------------------------------------------------------------
+        // BakeAo: 上流 + AO の設定。
+        //
+        // ここも上流は Unwrap。色を動かしても AO は焼き直さない。
+        // AO はこのパイプラインで一番重い段なので、ここの依存を
+        // 1 つ増やすだけで体感が大きく落ちる
+        //--------------------------------------------------------------------
+        Hasher aoHasher;
+        aoHasher.Mix(m_currentHash[static_cast<size_t>(PipelineStage::Unwrap)]);
+        aoHasher.Mix(m_params.aoRayCount);
+        aoHasher.Mix(m_params.aoDistance);
+        aoHasher.Mix(m_params.aoTextureDivisor);
+        aoHasher.Mix(m_params.dilatePasses);
+        m_currentHash[static_cast<size_t>(PipelineStage::BakeAo)] = aoHasher.Get();
 
         //--------------------------------------------------------------------
         // dirty 判定。上流のハッシュを自分へ混ぜてあるので、
@@ -452,6 +469,38 @@ namespace RockCore {
             ++m_surfaceMapRevision;
 
             markCompleted(PipelineStage::BakeColor, ElapsedMilliseconds(begin));
+        }
+
+        //--------------------------------------------------------------------
+        // BakeAo
+        //--------------------------------------------------------------------
+        if(shouldRun(PipelineStage::BakeAo)) {
+            if(!m_fullField) {
+                return false;
+            }
+            const auto begin = Now();
+
+            //----------------------------------------------------------------
+            // AO 専用の G-Buffer を作る。
+            //
+            // 解像度を落として焼くので、UV のラスタライズからやり直す。
+            // ラスタライズ自体は AO の本体に比べれば無視できる時間で、
+            // 1/4 なら 1/16 のテクセルしか撃たずに済む
+            //----------------------------------------------------------------
+            const int divisor = std::clamp(m_params.aoTextureDivisor, 1, 8);
+            const int aoSize  = std::max(m_params.textureSize / divisor, 16);
+
+            RasterizeUv(m_mesh, aoSize, m_aoGBuffer);
+
+            if(!BakeAoMap(m_aoGBuffer, *m_fullField, m_params, m_aoMap, progress, cancel, &m_aoStats)) {
+                // 中断された。ハッシュを記録しないので次回やり直す
+                return false;
+            }
+
+            DilateImage(m_aoMap, m_aoGBuffer.GetCoverage(), m_params.dilatePasses);
+            ++m_aoMapRevision;
+
+            markCompleted(PipelineStage::BakeAo, ElapsedMilliseconds(begin));
         }
 
         return true;

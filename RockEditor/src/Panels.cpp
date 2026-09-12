@@ -360,6 +360,22 @@ namespace RockEditor {
         ImGui::SetItemTooltip("%s", Tr(UiText::TipDilatePasses));
 
         ImGui::Separator();
+
+        //--------------------------------------------------------------------
+        // AO。このツールで一番重い段なので、つまみを他と分けて見せる
+        //--------------------------------------------------------------------
+        ImGui::TextUnformatted(Tr(UiText::HeadingAo));
+
+        ImGui::SliderInt(Tr(UiText::LabelAoRayCount), &params.aoRayCount, 1, 128);
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipAoRayCount));
+
+        ImGui::SliderFloat(Tr(UiText::LabelAoDistance), &params.aoDistance, 0.0f, 0.5f, "%.3f");
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipAoDistance));
+
+        ImGui::SliderInt(Tr(UiText::LabelAoDivisor), &params.aoTextureDivisor, 1, 8);
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipAoDivisor));
+
+        ImGui::Separator();
         DrawNote(Tr(UiText::NotePhase45Bake));
 
         ImGui::End();
@@ -457,6 +473,8 @@ namespace RockEditor {
         //--------------------------------------------------------------------
         ImGui::Text(Tr(UiText::FormatCavityRatio), snapshot.surface.cavityRatio * 100.0f);
         ImGui::Text(Tr(UiText::FormatLuminanceRange), snapshot.surface.minLuminance, snapshot.surface.maxLuminance);
+        ImGui::Text(Tr(UiText::FormatAoMean), snapshot.ao.meanOcclusion);
+        ImGui::Text(Tr(UiText::FormatAoMin), snapshot.ao.minOcclusion);
 
         ImGui::Separator();
 

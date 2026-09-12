@@ -82,6 +82,7 @@ namespace RockEditor {
         RockCore::u32 m_uploadedMeshRevision    = 0;
         RockCore::u32 m_uploadedNormalRevision  = 0;
         RockCore::u32 m_uploadedSurfaceRevision = 0;
+        RockCore::u32 m_uploadedAoRevision      = 0;
 
         //! 岩の外接半径。カメラ距離の基準に使う
         float m_boundingRadius = 1.0f;

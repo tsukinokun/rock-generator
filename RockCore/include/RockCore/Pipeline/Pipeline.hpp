@@ -9,13 +9,14 @@
 //!                     ├→ [Unwrap]     0.5-3s
 //!                     ├→ [BakeNormal] 0.3-2s
 //!                     ├→ [BakeColor]  0.2-1s
-//!                     └→ [BakeAo]     1-10s        （Phase 5）
+//!                     └→ [BakeAo]     5-60s        ★ここが一番重い
 //!
 //!         各段は「自分が依存するパラメータのハッシュ」を持ちます。上流の
 //!         ハッシュを自分のハッシュへ混ぜているので、無効化の伝播を
 //!         手で書く必要がありません（書くと必ずどこかで漏れる）。
 //----------------------------------------------------------------------------
 #pragma once
+#include <RockCore/Bake/AoBaker.hpp>
 #include <RockCore/Bake/ImageBuffer.hpp>
 #include <RockCore/Bake/NormalBaker.hpp>
 #include <RockCore/Bake/SurfaceBaker.hpp>
@@ -45,6 +46,7 @@ namespace RockCore {
         Unwrap,        //!< UV 展開と UV 空間のラスタライズ
         BakeNormal,    //!< Normal マップ
         BakeColor,     //!< Albedo と MetallicRoughness
+        BakeAo,        //!< AO
         Count,
     };
 
@@ -179,6 +181,14 @@ namespace RockCore {
         //! @return ベイクの数値
         const SurfaceBakeStats& GetSurfaceBakeStats() const { return m_surfaceStats; }
 
+        //! AO マップを返します。R チャンネルだけを使います。
+        //! @return AO マップ
+        const ImageBuffer& GetAoMap() const { return m_aoMap; }
+
+        //! AO ベイクの数値を返します。
+        //! @return ベイクの数値
+        const AoBakeStats& GetAoBakeStats() const { return m_aoStats; }
+
         //! UV 展開の数値を返します。
         //! @return UV 展開の数値
         const UnwrapStats& GetUnwrapStats() const { return m_unwrapStats; }
@@ -198,6 +208,10 @@ namespace RockCore {
         //! Albedo / MR が更新された回数を返します。2枚は必ず同時に焼けるので1つで足ります。
         //! @return 更新回数
         u32 GetSurfaceMapRevision() const { return m_surfaceMapRevision; }
+
+        //! AO マップが更新された回数を返します。
+        //! @return 更新回数
+        u32 GetAoMapRevision() const { return m_aoMapRevision; }
 
         //! 岩が収まる球の半径を返します。カメラ距離の基準に使います。
         //! @return 外接半径。まだ場が無ければ params の半径を返す
@@ -221,7 +235,7 @@ namespace RockCore {
 
         RockParams m_params{};
 
-        PipelineStage m_targetStage = PipelineStage::BakeColor;
+        PipelineStage m_targetStage = PipelineStage::BakeAo;
 
         bool m_fastPreview = false;
 
@@ -263,9 +277,22 @@ namespace RockCore {
         ImageBuffer      m_metallicRoughnessMap{};
         SurfaceBakeStats m_surfaceStats{};
 
+        //--------------------------------------------------------------------
+        //! AO 専用の G-Buffer。
+        //!
+        //! AO だけ解像度を落として焼くので、他のマップとは別に持つ。
+        //! 倍率が 1 のときも共有せず作り直す。共有すると「倍率を 1 へ
+        //! 戻したときだけ経路が変わる」という分岐が増え、そこが必ず腐る
+        //--------------------------------------------------------------------
+        BakeGBuffer m_aoGBuffer{};
+
+        ImageBuffer m_aoMap{};
+        AoBakeStats m_aoStats{};
+
         u32 m_meshRevision       = 0;
         u32 m_normalMapRevision  = 0;
         u32 m_surfaceMapRevision = 0;
+        u32 m_aoMapRevision      = 0;
     };
 
 }    // namespace RockCore

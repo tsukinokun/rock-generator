@@ -20,10 +20,11 @@
 //!           6. Albedo / MR ベイク。窪みの信号が届いているか、窪みが
 //!              出っぱりより暗いか、メタリックが 0 のままか、
 //!              sRGB で符号化されているか
-//!           7. メッシュの健全性。閉じているか、退化が無いか、破断面が
+//!           7. AO。凸な形が自己遮蔽しないか、割れ目が暗いか、距離 0 で切れるか
+//!           8. メッシュの健全性。閉じているか、退化が無いか、破断面が
 //!              実エッジとして乗っているか（半空間クリップの穴埋めの検証）
-//!           8. 4 プリセットが完走し、決定論を保つか
-//!           9. RockParams の JSON 往復
+//!           9. 4 プリセットが完走し、決定論を保つか
+//!          10. RockParams の JSON 往復
 //----------------------------------------------------------------------------
 #include <RockCore/Bake/Dilate.hpp>
 #include <RockCore/Bake/NormalBaker.hpp>
@@ -173,7 +174,7 @@ namespace {
 
         auto run = [&](Pipeline& pipeline) {
             pipeline.GetMutableParams() = params;
-            pipeline.SetTargetStage(PipelineStage::BakeColor);
+            pipeline.SetTargetStage(PipelineStage::BakeAo);
             return pipeline.Update(nullptr, nullptr);
         };
 
@@ -188,6 +189,7 @@ namespace {
         Check(a.GetAlbedoMap().GetPixels() == b.GetAlbedoMap().GetPixels(), "albedo map is bit identical");
         Check(a.GetMetallicRoughnessMap().GetPixels() == b.GetMetallicRoughnessMap().GetPixels(),
               "metallic-roughness map is bit identical");
+        Check(a.GetAoMap().GetPixels() == b.GetAoMap().GetPixels(), "AO map is bit identical");
 
         std::printf("       vertices=%u triangles=%u covered texels=%u\n",
                     a.GetMesh().GetVertexCount(),
@@ -199,9 +201,10 @@ namespace {
         Pipeline pipeline;
         pipeline.GetMutableParams().textureSize      = 128;
         pipeline.GetMutableParams().targetEdgeLength = 0.09f;
-        pipeline.SetTargetStage(PipelineStage::BakeColor);
+        pipeline.SetTargetStage(PipelineStage::BakeAo);
         pipeline.Update(nullptr, nullptr);
 
+        const u32 aoRuns     = pipeline.GetStageStatus(PipelineStage::BakeAo).runCount;
         const u32 unwrapRuns = pipeline.GetStageStatus(PipelineStage::Unwrap).runCount;
         const u32 bakeRuns   = pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount;
         const u32 colorRuns  = pipeline.GetStageStatus(PipelineStage::BakeColor).runCount;
@@ -221,6 +224,7 @@ namespace {
         Check(pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount == bakeRuns, "color change does not re-run Bake:Normal");
         Check(pipeline.GetStageStatus(PipelineStage::Mesh).runCount == meshRuns, "color change does not re-run Mesh");
         Check(pipeline.GetStageStatus(PipelineStage::BakeColor).runCount == colorRuns + 1, "color change re-runs Bake:Color");
+        Check(pipeline.GetStageStatus(PipelineStage::BakeAo).runCount == aoRuns, "color change does not re-run Bake:AO");
 
         // 形を動かすと全段走る
         pipeline.GetMutableParams().noiseLayers[0].amplitude = 0.3f;
@@ -230,6 +234,7 @@ namespace {
         Check(pipeline.GetStageStatus(PipelineStage::Unwrap).runCount == unwrapRuns + 1, "shape change re-runs Unwrap");
         Check(pipeline.GetStageStatus(PipelineStage::BakeNormal).runCount == bakeRuns + 1, "shape change re-runs Bake:Normal");
         Check(pipeline.GetStageStatus(PipelineStage::BakeColor).runCount == colorRuns + 2, "shape change re-runs Bake:Color");
+        Check(pipeline.GetStageStatus(PipelineStage::BakeAo).runCount == aoRuns + 1, "shape change re-runs Bake:AO");
     }
 
     void TestUnwrapCoverage() {
@@ -959,6 +964,196 @@ namespace {
         Check(srgbMatches, "a flat colour bakes to the sRGB encoding of the base colour");
     }
 
+    void TestAoBake() {
+        constexpr int kTextureSize = 128;
+
+        //--------------------------------------------------------------------
+        // 1. 凸な形（球）は遮蔽されない。
+        //
+        //    これがレイキャストの一番効く検査。開始点を浮かせる量が足りないと
+        //    自分自身に当たり、球なのに全面が薄暗くなる。見た目では
+        //    「なんとなく暗い」としか分からず原因に辿り着けない
+        //--------------------------------------------------------------------
+        Pipeline sphere;
+        sphere.GetMutableParams().textureSize      = kTextureSize;
+        sphere.GetMutableParams().targetEdgeLength = 0.09f;
+        sphere.GetMutableParams().planeCutCount    = 0;
+        for(NoiseLayerParams& layer : sphere.GetMutableParams().noiseLayers) {
+            layer.enabled = false;
+        }
+        sphere.SetTargetStage(PipelineStage::BakeAo);
+
+        Check(sphere.Update(nullptr, nullptr), "the AO bake completes for a convex shape");
+
+        const AoBakeStats& sphereStats = sphere.GetAoBakeStats();
+
+        std::printf("       sphere: AO min=%.3f mean=%.3f\n", sphereStats.minOcclusion, sphereStats.meanOcclusion);
+        Check(sphereStats.minOcclusion > 0.999f, "a convex rock has no self-occlusion anywhere");
+
+        //--------------------------------------------------------------------
+        // 2. 既定の岩は遮蔽される
+        //--------------------------------------------------------------------
+        Pipeline pipeline;
+        pipeline.GetMutableParams().textureSize      = kTextureSize;
+        pipeline.GetMutableParams().targetEdgeLength = 0.05f;
+
+        // 窪みとの対応を見るために、AO を MR と同じ解像度で焼く。
+        // 既定の 1/4 のままだとテクセルが 1 対 1 で並ばない
+        pipeline.GetMutableParams().aoTextureDivisor = 1;
+        pipeline.SetTargetStage(PipelineStage::BakeAo);
+
+        Check(pipeline.Update(nullptr, nullptr), "the AO bake completes for the default rock");
+
+        const AoBakeStats& stats  = pipeline.GetAoBakeStats();
+        const BakeGBuffer& buffer = pipeline.GetBakeGBuffer();
+
+        std::printf("       rock:   AO min=%.3f mean=%.3f  (%.1f ms)\n",
+                    stats.minOcclusion,
+                    stats.meanOcclusion,
+                    pipeline.GetStageStatus(PipelineStage::BakeAo).milliseconds);
+
+        Check(stats.texelsWritten > 0, "the AO bake wrote texels");
+        Check(stats.minOcclusion < 0.95f, "the default rock is occluded somewhere");
+        Check(stats.meanOcclusion > 0.5f, "the rock is not uniformly black");
+
+        //--------------------------------------------------------------------
+        // 3. 遮蔽されている場所は窪みと一致する。
+        //
+        //    AO と Albedo / MR は別々の経路で作られるので、両方が同じ窪みを
+        //    指しているかを見る。片方だけ見ていると「AO は焼けているが
+        //    割れ目と無関係の場所が暗い」に気付けない
+        //--------------------------------------------------------------------
+        const std::vector<u8>& ao = pipeline.GetAoMap().GetPixels();
+        const std::vector<u8>& mr = pipeline.GetMetallicRoughnessMap().GetPixels();
+
+        std::vector<u8> roughnessValues;
+        roughnessValues.reserve(static_cast<size_t>(stats.texelsWritten));
+
+        for(int y = 0; y < kTextureSize; ++y) {
+            for(int x = 0; x < kTextureSize; ++x) {
+                if(buffer.IsCovered(x, y)) {
+                    const size_t index =
+                        (static_cast<size_t>(y) * static_cast<size_t>(kTextureSize) + static_cast<size_t>(x)) * 4u;
+                    roughnessValues.push_back(mr[index + 1]);
+                }
+            }
+        }
+
+        double cavitySum   = 0.0;
+        double raisedSum   = 0.0;
+        u32    cavityCount = 0;
+        u32    raisedCount = 0;
+
+        if(!roughnessValues.empty()) {
+            std::vector<u8> sorted = roughnessValues;
+            std::sort(sorted.begin(), sorted.end());
+
+            const u8 lowCut  = sorted[sorted.size() / 10];
+            const u8 highCut = sorted[(sorted.size() * 9) / 10];
+
+            for(int y = 0; y < kTextureSize; ++y) {
+                for(int x = 0; x < kTextureSize; ++x) {
+                    if(!buffer.IsCovered(x, y)) {
+                        continue;
+                    }
+
+                    const size_t index =
+                        (static_cast<size_t>(y) * static_cast<size_t>(kTextureSize) + static_cast<size_t>(x)) * 4u;
+
+                    if(mr[index + 1] >= highCut) {
+                        cavitySum += ao[index];
+                        ++cavityCount;
+                    } else if(mr[index + 1] <= lowCut) {
+                        raisedSum += ao[index];
+                        ++raisedCount;
+                    }
+                }
+            }
+        }
+
+        if(cavityCount > 0 && raisedCount > 0) {
+            const double cavityMean = cavitySum / static_cast<double>(cavityCount);
+            const double raisedMean = raisedSum / static_cast<double>(raisedCount);
+
+            std::printf("       mean AO: cavity=%.1f  raised=%.1f\n", cavityMean, raisedMean);
+            Check(cavityMean < raisedMean, "AO is darker in the cavities than on the raised parts");
+        } else {
+            Check(false, "could not split texels into cavity and raised");
+        }
+
+        //--------------------------------------------------------------------
+        // 4. 距離 0 は「AO を切る」意味。真っ白になること
+        //--------------------------------------------------------------------
+        Pipeline disabled;
+        disabled.GetMutableParams().textureSize      = 64;
+        disabled.GetMutableParams().targetEdgeLength = 0.09f;
+        disabled.GetMutableParams().aoDistance       = 0.0f;
+        disabled.SetTargetStage(PipelineStage::BakeAo);
+        disabled.Update(nullptr, nullptr);
+
+        bool allWhite = !disabled.GetAoMap().GetPixels().empty();
+        for(const u8 value : disabled.GetAoMap().GetPixels()) {
+            if(value != 255u) {
+                allWhite = false;
+                break;
+            }
+        }
+        Check(allWhite, "an AO distance of 0 leaves the map white");
+
+        //--------------------------------------------------------------------
+        // 5. 解像度の分母が効いているか。
+        //
+        //    ここが効かないと、AO だけ他のマップと同じ枚数を焼くことになり、
+        //    ベイク時間が 16 倍のまま黙って戻る
+        //--------------------------------------------------------------------
+        Pipeline reduced;
+        reduced.GetMutableParams().textureSize      = 128;
+        reduced.GetMutableParams().targetEdgeLength = 0.09f;
+        reduced.GetMutableParams().aoTextureDivisor = 4;
+        reduced.GetMutableParams().aoRayCount       = 8;
+        reduced.SetTargetStage(PipelineStage::BakeAo);
+        reduced.Update(nullptr, nullptr);
+
+        std::printf("       divisor 4: AO map is %d px (texture is 128 px)\n", reduced.GetAoMap().GetWidth());
+        Check(reduced.GetAoMap().GetWidth() == 32, "the AO divisor shrinks the AO map");
+        Check(reduced.GetNormalMap().GetWidth() == 128, "the AO divisor does not touch the other maps");
+
+        //--------------------------------------------------------------------
+        // 6. 形を凹ませたら AO が濃くなるか。
+        //
+        //    既定の岩の AO は平均 0.99 とほとんど効かない。これは実装の
+        //    取りこぼしではなく、半空間の交わりが凸で、凹みを作るのが
+        //    振幅 0.014 の割れ目だけだから（刻みを 3 倍にしても平均は
+        //    0.995 → 0.994 しか動かないことを実測で確かめてある）。
+        //
+        //    「薄いのが正しい」と「壊れていて薄い」を区別できないと、
+        //    後から AO を壊しても誰も気付けない。割れ目を深く細くしたら
+        //    はっきり濃くなることを検査にしておく
+        //--------------------------------------------------------------------
+        Pipeline cracked;
+        cracked.GetMutableParams().textureSize      = kTextureSize;
+        cracked.GetMutableParams().targetEdgeLength = 0.05f;
+        cracked.GetMutableParams().aoTextureDivisor = 1;
+
+        for(NoiseLayerParams& layer : cracked.GetMutableParams().noiseLayers) {
+            if(layer.kind == NoiseLayerKind::Worley) {
+                layer.amplitude = 0.09f;    // 既定の 0.014 から深くする
+                layer.sharpness = 0.03f;    // 溝を細くする
+            }
+        }
+        cracked.SetTargetStage(PipelineStage::BakeAo);
+        cracked.Update(nullptr, nullptr);
+
+        const AoBakeStats& crackedStats = cracked.GetAoBakeStats();
+
+        std::printf("       deep cracks: AO min=%.3f mean=%.3f  (default mean was %.3f)\n",
+                    crackedStats.minOcclusion,
+                    crackedStats.meanOcclusion,
+                    stats.meanOcclusion);
+        Check(crackedStats.meanOcclusion < stats.meanOcclusion - 0.02f,
+              "deeper cracks produce visibly more occlusion");
+    }
+
     void TestJsonRoundTrip() {
         RockParams original{};
         original.seed                       = 987654321u;
@@ -1005,6 +1200,8 @@ int RunCoreVerification() {
     TestXAtlasUnwrap();
     std::printf("--- Surface (Albedo / MR) ---\n");
     TestSurfaceBake();
+    std::printf("--- AO ---\n");
+    TestAoBake();
     std::printf("--- Mesh integrity ---\n");
     TestMeshIntegrity();
     std::printf("--- Presets ---\n");

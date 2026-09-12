@@ -171,6 +171,19 @@ namespace RockEditor {
             "Luminance     : %.2f .. %.2f",
 
             "Bake: Colour",
+
+            "Ambient occlusion",
+            "Rays per texel###ao_rays",
+            "The heaviest knob in the tool. Doubling it doubles the bake time and barely changes the picture past 32",
+            "Ray length (m)###ao_distance",
+            "How far a ray looks for a blocker. Longer reaches into the wide dents, shorter keeps it to the cracks. 0 turns AO off",
+            "Resolution divisor###ao_divisor",
+            "AO is low frequency, so it does not need the full texture size. 4 cuts the bake to a sixteenth and looks the same",
+
+            "AO mean      : %.3f",
+            "AO min       : %.3f",
+
+            "Bake: AO",
         };
 
         //--------------------------------------------------------------------
@@ -330,6 +343,19 @@ namespace RockEditor {
             "明度        : %.2f .. %.2f",
 
             "ベイク: 色",
+
+            "アンビエントオクルージョン",
+            "テクセルあたりのレイ本数###ao_rays",
+            "このツールで一番重いつまみ。倍にすると時間も倍になるが、32 を超えると絵はほとんど変わらない",
+            "レイの長さ (m)###ao_distance",
+            "遮蔽を探す距離。長いと大きな窪みまで拾い、短いと割れ目だけになる。0 で AO を切る",
+            "解像度の分母###ao_divisor",
+            "AO は低周波なので他のマップと同じ解像度が要らない。4 にすると時間が 1/16 になり、見た目は変わらない",
+
+            "AO 平均     : %.3f",
+            "AO 最小     : %.3f",
+
+            "ベイク: AO",
         };
 
         constexpr size_t kTextCount = static_cast<size_t>(UiText::Count);
@@ -433,6 +459,7 @@ namespace RockEditor {
         case RockCore::PipelineStage::Unwrap:     return Tr(UiText::StageUnwrap);
         case RockCore::PipelineStage::BakeNormal: return Tr(UiText::StageBakeNormal);
         case RockCore::PipelineStage::BakeColor:  return Tr(UiText::StageBakeColor);
+        case RockCore::PipelineStage::BakeAo:     return Tr(UiText::StageBakeAo);
         default:                                  return "?";
         }
     }

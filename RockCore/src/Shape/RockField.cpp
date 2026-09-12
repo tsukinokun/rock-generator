@@ -102,7 +102,10 @@ namespace RockCore {
 
         const float maxAniso =
             std::max(std::abs(m_anisoScale.x), std::max(std::abs(m_anisoScale.y), std::abs(m_anisoScale.z)));
-        m_boundingRadius = m_radius * (1.0f + amplitudeSum) * maxAniso;
+
+        m_maxDisplacement = amplitudeSum;
+        m_maxRadius       = m_radius * (1.0f + amplitudeSum);
+        m_boundingRadius  = m_maxRadius * maxAniso;
     }
 
     //------------------------------------------------------------------------
@@ -206,6 +209,114 @@ namespace RockCore {
         }
 
         return (sum * 0.25f - radius) / radius;
+    }
+
+    //------------------------------------------------------------------------
+    //! レイが岩へ入るかを調べます。
+    //------------------------------------------------------------------------
+    bool RockField::Raycast1D(const Vec3& origin, const Vec3& dir, float tMin, float tMax, int steps, float& outT) const {
+        if(tMax <= tMin || steps <= 0) {
+            return false;
+        }
+
+        //--------------------------------------------------------------------
+        // 外接球を出る時刻まで区間を詰める。
+        //
+        // 異方スケールを戻した空間では、内側にいる条件が |q| < Radius(dir) で、
+        // Radius は m_maxRadius を超えない。|q(t)| は t の凸関数なので
+        // 「外接球の内側にいる時刻」はひとつながりの区間になり、その外は
+        // 調べるだけ無駄。岩の外へまっすぐ向いたレイはここでほぼ消える
+        //--------------------------------------------------------------------
+        const Vec3 q = Mul(m_invAnisoScale, origin);
+        const Vec3 d = Mul(m_invAnisoScale, dir);    // 正規化されていないことに注意
+
+        const float a = Dot(d, d);
+        if(a <= 1e-12f) {
+            return false;
+        }
+
+        const float b            = Dot(q, d);
+        const float c            = Dot(q, q) - m_maxRadius * m_maxRadius;
+        const float discriminant = b * b - a * c;
+
+        if(discriminant <= 0.0f) {
+            // 外接球に触れない。遮蔽はあり得ない
+            return false;
+        }
+
+        const float exitT = (-b + std::sqrt(discriminant)) / a;
+        const float limit = std::min(tMax, exitT);
+
+        if(limit <= tMin) {
+            return false;
+        }
+
+        //--------------------------------------------------------------------
+        // 区間を等分して符号の変化を探す。
+        //
+        // 刻み幅を区間から決めているので、短い区間ほど自動的に細かくなる。
+        // 固定幅にすると、短い区間で無駄に細かく、長い区間で穴を飛び越える
+        //--------------------------------------------------------------------
+        const float step = (limit - tMin) / static_cast<float>(steps);
+
+        // ノイズを含めた半径の上限。ここを下回らない点は確実に外側なので、
+        // 高いノイズの評価を省ける。破断面の smin だけなら桁違いに安い
+        const float displacementBound = 1.0f + m_maxDisplacement;
+
+        float previousT     = tMin;
+        float previousValue = 0.0f;
+        bool  hasPrevious   = false;
+
+        for(int i = 0; i <= steps; ++i) {
+            const float t = (i == steps) ? limit : (tMin + step * static_cast<float>(i));
+
+            const Vec3  point = q + d * t;
+            const float length = Length(point);
+            if(length <= 1e-8f) {
+                outT = t;
+                return true;
+            }
+
+            const Vec3 direction = point / length;
+
+            //----------------------------------------------------------------
+            // 安い上限で枝刈りする。
+            //
+            // Radius は BaseRadius * (1 + noise) で、noise は ±変位の総和に
+            // 収まる。BaseRadius は平面の smin だけなのでノイズより桁違いに安い。
+            // 表面から離れた点はここでほとんど落ちる
+            //----------------------------------------------------------------
+            const float upperBound = std::max(BaseRadius(direction) * displacementBound, m_radius * 0.05f);
+
+            if(length >= upperBound) {
+                previousT     = t;
+                previousValue = length - upperBound;
+                hasPrevious   = true;
+                continue;
+            }
+
+            const float value = length - Radius(direction);
+            if(value < 0.0f) {
+                //------------------------------------------------------------
+                // 入った。手前の値と線形に結んで交点を詰める。
+                // 枝刈りで飛ばした点の値は上限との差なので厳密ではないが、
+                // AO は「当たったか」しか見ないので実害が無い
+                //------------------------------------------------------------
+                if(hasPrevious && previousValue > value) {
+                    const float ratio = previousValue / (previousValue - value);
+                    outT              = previousT + (t - previousT) * ratio;
+                } else {
+                    outT = t;
+                }
+                return true;
+            }
+
+            previousT     = t;
+            previousValue = value;
+            hasPrevious   = true;
+        }
+
+        return false;
     }
 
     //------------------------------------------------------------------------

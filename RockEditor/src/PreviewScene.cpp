@@ -229,6 +229,13 @@ namespace RockEditor {
     }
 
     //------------------------------------------------------------------------
+    //! AO を GPU へ載せ直します。
+    //------------------------------------------------------------------------
+    void PreviewScene::UploadAoMap(ID3D11Device* device, const RockCore::ImageBuffer& image) {
+        UploadBakedTexture(device, image, false, m_aoMap);
+    }
+
+    //------------------------------------------------------------------------
     //! カメラとライトをレンダラへ設定します。
     //------------------------------------------------------------------------
     void PreviewScene::SubmitCameraAndLight(EngineBootstrap& engine, const PreviewViewSettings& view, float boundingRadius) {
@@ -329,7 +336,12 @@ namespace RockEditor {
         material.SetTexture(SRVSlot::MetallicRoughness,
                             useBakedSurface ? m_metallicRoughnessMap.srv.Get() : white);
         material.SetTexture(SRVSlot::Emissive, white);
-        material.SetTexture(SRVSlot::AO, white);
+
+        // AO は焼けていれば常に貼る。白（= 遮蔽なし）が既定なので、
+        // 貼っていない間との差は「暗くなるかどうか」だけで済む
+        const bool useBakedAo = m_bakedMapsVisible && m_aoMap.srv;
+
+        material.SetTexture(SRVSlot::AO, useBakedAo ? m_aoMap.srv.Get() : white);
 
         //--------------------------------------------------------------------
         // テクスチャ値は cbuffer 定数との乗算（GBuffer.ps.hlsl:95-108）。

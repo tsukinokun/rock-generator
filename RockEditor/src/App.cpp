@@ -152,7 +152,7 @@ namespace RockEditor {
         // 操作中は Unwrap まで。UV が無いとベイク済みのマップを貼る座標が
         // 取れないので、Mesh で止めずに Unwrap までは進めておく
         const RockCore::PipelineStage target =
-            m_editing ? RockCore::PipelineStage::Unwrap : RockCore::PipelineStage::BakeColor;
+            m_editing ? RockCore::PipelineStage::Unwrap : RockCore::PipelineStage::BakeAo;
 
         // 形を動かしている最中は、前の形で焼いたマップを貼らない
         m_preview.SetBakedMapsVisible(!m_editing);
@@ -216,6 +216,11 @@ namespace RockEditor {
             m_uploadedSurfaceRevision = m_pipeline.GetSurfaceMapRevision();
         }
 
+        if(m_pipeline.GetAoMapRevision() != m_uploadedAoRevision) {
+            m_preview.UploadAoMap(device, m_pipeline.GetAoMap());
+            m_uploadedAoRevision = m_pipeline.GetAoMapRevision();
+        }
+
         m_boundingRadius = m_pipeline.GetBoundingRadius();
 
         // UI が読むのはこの写しだけ
@@ -223,6 +228,7 @@ namespace RockEditor {
         m_snapshot.unwrap         = m_pipeline.GetUnwrapStats();
         m_snapshot.normal         = m_pipeline.GetNormalBakeStats();
         m_snapshot.surface        = m_pipeline.GetSurfaceBakeStats();
+        m_snapshot.ao             = m_pipeline.GetAoBakeStats();
         m_snapshot.coveredTexels  = m_pipeline.GetBakeGBuffer().GetCoveredTexelCount();
         m_snapshot.textureSize    = m_pipeline.GetBakeGBuffer().GetSize();
         m_snapshot.boundingRadius = m_boundingRadius;
