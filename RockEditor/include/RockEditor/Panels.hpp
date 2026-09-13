@@ -50,6 +50,9 @@ namespace RockEditor {
         bool        showImGuiDemo = false;
         std::string ioStatus;              //!< 保存／読み込みの結果メッセージ
         std::string paramsFilePath = "rock.json";
+
+        std::string exportFilePath = "rock.glb";    //!< 拡張子（.glb/.fbx）で形式を選ぶ
+        std::string exportStatus;                   //!< 書き出し結果のメッセージ
     };
 
     //------------------------------------------------------------------------
@@ -80,20 +83,33 @@ namespace RockEditor {
     void DrawStatsPanel(const PipelineSnapshot& snapshot, bool busy, float progress, const std::string& label);
 
     //------------------------------------------------------------------------
-    //! 設定と保存・読み込みのパネルを描きます。
+    //! 設定と保存・読み込み・書き出しのパネルを描きます。
     //!
     //! 言語が変わったかを返すのは、変わった瞬間だけ設定ファイルへ書きたい
     //! ためです（毎フレーム書くわけにはいかない）。
+    //!
+    //! 書き出しは拡張子（.glb / .fbx）で形式を選びます。RockCli の
+    //! --export と同じ RockExport::ExportRock を呼ぶだけなので、CLI で
+    //! 書けるものはここでも書けます（逆も同じ）。pipeline は
+    //! PipelineStage::BakeAo まで焼けた状態を渡してください。ワーカーが
+    //! 走っている間やまだ一度も焼き上がっていない間はボタンを無効にします
+    //! — 動かしている途中の中途半端な結果を書き出さないためです。
     //!
     //! @param  [in,out] params                岩のパラメータ
     //! @param  [in,out] ui                    UI の状態
     //! @param  [in,out] settings              エディタの設定
     //! @param  [in]     japaneseFontAvailable 日本語フォントが読めているか
+    //! @param  [in]     pipeline              焼き上がった Pipeline（書き出し用）
+    //! @param  [in]     busy                  ワーカーが走っているか
+    //! @param  [in]     hasResult             一度でも焼き上がったことがあるか
     //! @return 言語が変わったら true
     //------------------------------------------------------------------------
-    bool DrawSettingsPanel(RockCore::RockParams& params,
-                           EditorUiState&        ui,
-                           EditorSettings&       settings,
-                           bool                  japaneseFontAvailable);
+    bool DrawSettingsPanel(RockCore::RockParams&     params,
+                           EditorUiState&            ui,
+                           EditorSettings&           settings,
+                           bool                      japaneseFontAvailable,
+                           const RockCore::Pipeline& pipeline,
+                           bool                      busy,
+                           bool                      hasResult);
 
 }    // namespace RockEditor

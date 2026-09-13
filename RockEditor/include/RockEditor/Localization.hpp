@@ -219,6 +219,16 @@ namespace RockEditor {
 
         StageBakeAo,
 
+        //-- 書き出し ---------------------------------------------------------
+        HeadingExport,
+        LabelExportPath,
+        TipExportPath,
+        ButtonExport,
+        NoteExportNotReady,
+        PrefixExported,
+        PrefixExportFailed,
+        PrefixExportWarning,
+
         Count,
     };
 

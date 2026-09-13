@@ -120,7 +120,13 @@ namespace RockEditor {
         DrawStatsPanel(m_snapshot, m_jobs.IsBusy(), m_jobs.GetProgress(), m_jobs.GetLabel());
 
         // 言語が変わった瞬間だけ書き出す。毎フレーム書くわけにはいかない
-        if(DrawSettingsPanel(m_editParams, m_ui, m_settings, m_imgui.HasJapaneseFont())) {
+        if(DrawSettingsPanel(m_editParams,
+                            m_ui,
+                            m_settings,
+                            m_imgui.HasJapaneseFont(),
+                            m_pipeline,
+                            m_jobs.IsBusy(),
+                            m_snapshot.valid)) {
             SetLanguage(m_settings.language);
             SaveEditorSettings(m_settings, kEditorSettingsFileName);
         }

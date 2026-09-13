@@ -14,6 +14,8 @@
 #include <RockCore/Shape/RockMesher.hpp>
 #include <RockCore/Shape/RockPresets.hpp>
 
+#include <RockExport/RockExporter.hpp>
+
 #include <imgui.h>
 
 #include <cstdio>
@@ -514,10 +516,13 @@ namespace RockEditor {
     //------------------------------------------------------------------------
     //! 設定と保存・読み込みのパネルを描きます。
     //------------------------------------------------------------------------
-    bool DrawSettingsPanel(RockCore::RockParams& params,
-                           EditorUiState&        ui,
-                           EditorSettings&       settings,
-                           bool                  japaneseFontAvailable) {
+    bool DrawSettingsPanel(RockCore::RockParams&     params,
+                           EditorUiState&            ui,
+                           EditorSettings&           settings,
+                           bool                      japaneseFontAvailable,
+                           const RockCore::Pipeline& pipeline,
+                           bool                      busy,
+                           bool                      hasResult) {
         bool languageChanged = false;
 
         if(!ImGui::Begin(Tr(UiText::WindowSettings))) {
@@ -588,6 +593,54 @@ namespace RockEditor {
 
         ImGui::Separator();
         ImGui::Checkbox(Tr(UiText::LabelImGuiDemo), &ui.showImGuiDemo);
+
+        ImGui::Separator();
+
+        //--------------------------------------------------------------------
+        // 書き出し。同じウィンドウへ間借りする（新しいドック位置を
+        // DockBuilder の既定レイアウトへ足さずに済むため）。
+        //
+        // 拡張子（.glb / .fbx）で形式を選ぶ。RockCli の --export と同じ
+        // RockExport::ExportRock を呼ぶだけなので、CLI で書けるものは
+        // ここでも書ける
+        //--------------------------------------------------------------------
+        ImGui::TextUnformatted(Tr(UiText::HeadingExport));
+
+        char exportPathBuffer[260];
+        std::snprintf(exportPathBuffer, sizeof(exportPathBuffer), "%s", ui.exportFilePath.c_str());
+        if(ImGui::InputText(Tr(UiText::LabelExportPath), exportPathBuffer, sizeof(exportPathBuffer))) {
+            ui.exportFilePath = exportPathBuffer;
+        }
+        ImGui::SetItemTooltip("%s", Tr(UiText::TipExportPath));
+
+        //--------------------------------------------------------------------
+        // ワーカーが走っている間、またはまだ一度も焼き上がっていない間は
+        // 押させない。動かしている途中の中途半端な結果（八面体射影のまま、
+        // 平坦な法線のまま等）を書き出させないための最低限の歯止め
+        //--------------------------------------------------------------------
+        const bool exportReady = !busy && hasResult;
+
+        ImGui::BeginDisabled(!exportReady);
+        const bool exportPressed = ImGui::Button(Tr(UiText::ButtonExport));
+        ImGui::EndDisabled();
+
+        if(!exportReady) {
+            DrawNote(Tr(UiText::NoteExportNotReady));
+        }
+
+        if(exportPressed && exportReady) {
+            std::string error;
+            if(RockExport::ExportRock(pipeline, ui.exportFilePath, &error)) {
+                ui.exportStatus = error.empty() ? (Tr(UiText::PrefixExported) + ui.exportFilePath)
+                                                : (Tr(UiText::PrefixExportWarning) + error);
+            } else {
+                ui.exportStatus = Tr(UiText::PrefixExportFailed) + error;
+            }
+        }
+
+        if(!ui.exportStatus.empty()) {
+            ImGui::TextWrapped("%s", ui.exportStatus.c_str());
+        }
 
         ImGui::End();
         return languageChanged;

@@ -202,9 +202,19 @@ project "RockCli"
         "RockCore/include",
         "RockExport/include",
         CEREAL_DIR,
+        ASSIMP_INCLUDE_DIR,
     }
 
     links { "RockCore", "RockExport" }
+
+    -- RockExport が Assimp のシンボルを未解決のまま持っているので、
+    -- 最終的にリンクする exe 側（ここ）で実体を持ってくる必要がある。
+    -- RockExport 自身は StaticLib で最終リンクをしないため nuget は要らない
+    -- （ヘッダだけ ASSIMP_INCLUDE_DIR 経由で見えていれば足りる）。
+    -- RockEditor は tsukino_link() が同じパッケージを内部で引くので二重にはならない
+    nuget {
+        "AssimpCpp:5.0.1.6",
+    }
 
     filter "action:vs*"
         buildoptions { "/permissive-" }

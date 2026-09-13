@@ -184,6 +184,16 @@ namespace RockEditor {
             "AO min       : %.3f",
 
             "Bake: AO",
+
+            "Export",
+            "Output file###export_path",
+            "Extension picks the format: .glb (engine, self-authored writer) or .fbx (DCC interop, via Assimp). "
+            "A <name>.json with the parameters is written alongside",
+            "Export",
+            "Finish generating before exporting (waiting for the bake to settle)",
+            "Exported ",
+            "Export failed: ",
+            "Exported, but: ",
         };
 
         //--------------------------------------------------------------------
@@ -356,6 +366,16 @@ namespace RockEditor {
             "AO 最小     : %.3f",
 
             "ベイク: AO",
+
+            "書き出し",
+            "出力ファイル###export_path",
+            "拡張子で形式を選ぶ。.glb（エンジン向け。自前ライタ）か .fbx（DCC 相互運用用。Assimp 経由）。"
+            "同じ場所へパラメータ入りの <名前>.json も添える",
+            "書き出し",
+            "生成が落ち着いてから書き出せます（ベイクの完了待ち）",
+            "書き出しました: ",
+            "書き出しに失敗: ",
+            "書き出しましたが: ",
         };
 
         constexpr size_t kTextCount = static_cast<size_t>(UiText::Count);
